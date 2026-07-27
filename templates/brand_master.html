@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Brand Master{% endblock %}
+{% block page_title %}Brand Master{% endblock %}
+{% block content %}
+<div class="grid-2">
+<div class="card">
+    <h2>Add / Edit Brand</h2>
+    <form method="POST" action="{{ url_for('save_brand') }}" id="masterForm">
+        <input type="hidden" name="record_id" id="record_id">
+        <label>Brand Name</label><input name="brand_name" id="master_name" required>
+        <label>Status</label><select name="status" id="master_status"><option>Active</option><option>Inactive</option></select>
+        <label>Remarks</label><textarea name="remarks" id="master_remarks"></textarea>
+        <div class="actions-inline">
+            <button class="btn" type="submit">Save Brand</button>
+            <button class="btn btn-secondary" type="button" id="clearForm">Clear</button>
+            <a class="btn btn-outline" href="{{ url_for('export_brands') }}">Export CSV</a>
+        </div>
+    </form>
+</div>
+<div class="card">
+    <h2>Brand List</h2>
+    <div class="table-wrap">
+    <table><thead><tr><th>Brand Name</th><th>Status</th><th>Remarks</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for item in brands %}
+    <tr>
+        <td>{{ item.brand_name }}</td><td>{{ item.status }}</td><td>{{ item.remarks or "-" }}</td>
+        <td>
+            <div class="actions-inline">
+                <button class="btn btn-outline edit-master" type="button"
+                    data-id="{{ item.id }}" data-name="{{ item.brand_name }}"
+                    data-status="{{ item.status }}"
+                    data-remarks="{{ item.remarks or '' }}">Edit</button>
+                <form method="POST"
+                      action="{{ url_for('delete_brand', brand_id=item.id) }}"
+                      onsubmit="return confirm('Delete brand {{ item.brand_name }}? This cannot be undone.');"
+                      style="display:inline; margin:0;">
+                    <button class="btn btn-danger" type="submit">Delete</button>
+                </form>
+            </div>
+        </td>
+    </tr>
+    {% else %}<tr><td colspan="4">No brands.</td></tr>{% endfor %}
+    </tbody></table>
+    </div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll(".edit-master").forEach(btn => btn.addEventListener("click", () => {
+    document.getElementById("record_id").value = btn.dataset.id;
+    document.getElementById("master_name").value = btn.dataset.name;
+    document.getElementById("master_status").value = btn.dataset.status;
+    document.getElementById("master_remarks").value = btn.dataset.remarks;
+    window.scrollTo({top:0,behavior:"smooth"});
+}));
+document.getElementById("clearForm").addEventListener("click", () => {
+    document.getElementById("masterForm").reset();
+    document.getElementById("record_id").value = "";
+});
+</script>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}HR Dashboard{% endblock %}
+{% block page_title %}HR Dashboard / Office Day Requests{% endblock %}
+{% block content %}
+<div class="metric-grid">
+    <div class="metric"><div class="value">{{ counts.employees }}</div><div class="label">Active Employees</div></div>
+    <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending HR Approval</div></div>
+    <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
+    <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active System Users</div></div>
+</div>
+
+<div class="card">
+    <div class="section-head"><h2>Office Day Requests</h2><a class="btn btn-outline" href="{{ url_for('reports') }}">Weekly Report</a></div>
+    {% for item in office_requests %}
+    <div class="request-card">
+        <div class="detail-grid">
+            <div class="detail"><small>Employee</small>{{ item.employee_name }}</div>
+            <div class="detail"><small>Company</small>{{ item.company_name or "-" }}</div>
+            <div class="detail"><small>Position</small>{{ item.position or "-" }}</div>
+            <div class="detail"><small>Brand</small>{{ item.brand }}</div>
+            <div class="detail"><small>Store Assignment</small>{{ item.store_assignment }}</div>
+            <div class="detail"><small>Requested Date</small>{{ item.requested_date }}</div>
+            <div class="detail"><small>Requested By</small>{{ item.requested_by_name }}</div>
+            <div class="detail"><small>Status</small><span class="badge">{{ item.status }}</span></div>
+        </div>
+        <p><strong>Purpose:</strong> {{ item.purpose }}{% if item.other_purpose %} — {{ item.other_purpose }}{% endif %}</p>
+        {% if item.remarks %}<p><strong>Sales Remarks:</strong> {{ item.remarks }}</p>{% endif %}
+        {% if item.hr_remarks %}<p><strong>HR Remarks:</strong> {{ item.hr_remarks }}</p>{% endif %}
+        {% if item.approved_date %}<p><strong>Approved/Adjusted Date:</strong> {{ item.approved_date }}</p>{% endif %}
+
+        {% if item.status == "Pending HR Approval" %}
+        <div class="grid-3">
+            <form method="POST" action="{{ url_for('approve_request', request_id=item.id) }}">
+                <label>HR Remarks (optional)</label>
+                <textarea name="hr_remarks"></textarea>
+                <button class="btn" type="submit">Approve</button>
+            </form>
+            <form method="POST" action="{{ url_for('adjust_request', request_id=item.id) }}">
+                <label>Adjusted Date</label>
+                <input type="date" name="adjusted_date" required>
+                <label>HR Remarks</label>
+                <textarea name="hr_remarks" required></textarea>
+                <button class="btn btn-warning" type="submit">Adjust Schedule</button>
+            </form>
+            <form method="POST" action="{{ url_for('reject_request', request_id=item.id) }}">
+                <label>Reason / HR Remarks</label>
+                <textarea name="hr_remarks" required></textarea>
+                <button class="btn btn-danger" type="submit">Reject</button>
+            </form>
+        </div>
+        {% endif %}
+        <div class="actions-inline" style="margin-top:14px;">
+            <form method="POST"
+                  action="{{ url_for('delete_request', request_id=item.id) }}"
+                  onsubmit="return confirm('Delete this Office Day request for {{ item.employee_name }}? This cannot be undone.');"
+                  style="display:inline; margin:0;">
+                <input type="hidden" name="return_to" value="hr_dashboard">
+                <button class="btn btn-danger" type="submit">Delete Request</button>
+            </form>
+        </div>
+    </div>
+    {% else %}
+        <p class="muted">No Office Day requests have been submitted.</p>
+    {% endfor %}
+</div>
+{% endblock %}

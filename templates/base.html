@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Office Day Scheduling System{% endblock %}</title>
+    <style>
+        :root {
+            --emerald-950: #022c22;
+            --emerald-900: #064e3b;
+            --emerald-800: #065f46;
+            --emerald-700: #047857;
+            --emerald-600: #059669;
+            --emerald-500: #10b981;
+            --emerald-100: #d1fae5;
+            --emerald-50: #ecfdf5;
+            --slate-950: #0f172a;
+            --slate-700: #334155;
+            --slate-500: #64748b;
+            --slate-300: #cbd5e1;
+            --slate-200: #e2e8f0;
+            --slate-100: #f1f5f9;
+            --white: #ffffff;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --info: #0284c7;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            background: #f8fafc;
+            color: var(--slate-950);
+        }
+        a { color: inherit; }
+        .app-shell { min-height: 100vh; display: flex; }
+        .sidebar {
+            width: 250px;
+            background: var(--emerald-900);
+            color: white;
+            padding: 24px 16px;
+            position: fixed;
+            inset: 0 auto 0 0;
+            overflow-y: auto;
+        }
+        .brand-mark {
+            padding: 0 12px 22px;
+            border-bottom: 1px solid rgba(255,255,255,.15);
+            margin-bottom: 18px;
+        }
+        .brand-mark strong { display:block; font-size: 18px; }
+        .brand-mark small { color: #a7f3d0; }
+        .nav-link {
+            display: block;
+            padding: 11px 13px;
+            margin: 5px 0;
+            border-radius: 9px;
+            text-decoration: none;
+            color: #ecfdf5;
+        }
+        .nav-link:hover, .nav-link.active {
+            background: var(--emerald-700);
+        }
+        .sidebar-user {
+            margin-top: 25px;
+            padding: 14px 12px;
+            background: rgba(255,255,255,.08);
+            border-radius: 10px;
+            font-size: 13px;
+        }
+        .main-area { margin-left: 250px; width: calc(100% - 250px); }
+        .topbar {
+            height: 72px;
+            background: var(--emerald-600);
+            color: white;
+            padding: 0 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .topbar h1 { margin: 0; font-size: 20px; }
+        .content { padding: 26px; max-width: 1500px; margin: auto; }
+        .card {
+            background: white;
+            border: 1px solid var(--slate-200);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 22px;
+            box-shadow: 0 4px 16px rgba(15,23,42,.04);
+        }
+        .card h2, .card h3 { margin-top: 0; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 16px;
+            margin-bottom: 22px;
+        }
+        .metric {
+            background: white;
+            border: 1px solid var(--slate-200);
+            border-left: 5px solid var(--emerald-500);
+            border-radius: 12px;
+            padding: 18px;
+        }
+        .metric .value { font-size: 30px; font-weight: 700; color: var(--emerald-800); }
+        .metric .label { color: var(--slate-500); margin-top: 4px; }
+        .grid-2 { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:18px; }
+        .grid-3 { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:18px; }
+        label { display:block; font-weight:600; margin-bottom:6px; color:var(--slate-700); }
+        input, select, textarea {
+            width: 100%;
+            border: 1px solid var(--slate-300);
+            border-radius: 8px;
+            padding: 10px 11px;
+            font: inherit;
+            background: white;
+            margin-bottom: 13px;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: 3px solid var(--emerald-100);
+            border-color: var(--emerald-600);
+        }
+        input[readonly] { background: var(--slate-100); }
+        textarea { min-height: 82px; resize: vertical; }
+        .btn {
+            display: inline-block;
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-weight: 650;
+            cursor: pointer;
+            text-decoration: none;
+            background: var(--emerald-600);
+            color: white;
+        }
+        .btn:hover { background: var(--emerald-700); }
+        .btn-secondary { background: var(--slate-700); }
+        .btn-danger { background: var(--danger); }
+        .btn-warning { background: var(--warning); }
+        .btn-outline {
+            background: white;
+            color: var(--emerald-700);
+            border: 1px solid var(--emerald-600);
+        }
+        .actions-inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        .message { padding: 13px 15px; border-radius: 9px; margin-bottom: 18px; }
+        .success { background:#dcfce7; color:#166534; }
+        .error { background:#fee2e2; color:#991b1b; }
+        .table-wrap { overflow-x:auto; }
+        table { width:100%; border-collapse:collapse; font-size:14px; }
+        th, td { text-align:left; border-bottom:1px solid var(--slate-200); padding:11px 9px; vertical-align:top; }
+        th { background:var(--emerald-50); color:var(--emerald-900); white-space:nowrap; }
+        .badge {
+            display:inline-block; padding:5px 9px; border-radius:999px;
+            font-size:12px; font-weight:700; background:var(--slate-100);
+        }
+        .badge-active, .badge-approved { background:#dcfce7; color:#166534; }
+        .badge-pending { background:#fef3c7; color:#92400e; }
+        .badge-rejected, .badge-inactive { background:#fee2e2; color:#991b1b; }
+        .badge-adjusted { background:#dbeafe; color:#1e40af; }
+        .request-card { border:1px solid var(--slate-200); border-radius:12px; padding:18px; margin-bottom:15px; }
+        .detail-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+        .detail { background:var(--slate-100); border-radius:8px; padding:10px; }
+        .detail small { display:block; color:var(--slate-500); font-weight:600; margin-bottom:3px; }
+        .muted { color:var(--slate-500); }
+        .section-head { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:16px; }
+        .section-head h2 { margin:0; }
+        .mobile-menu { display:none; }
+        @media (max-width: 1000px) {
+            .metric-grid, .detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+            .grid-3 { grid-template-columns:1fr; }
+        }
+        @media (max-width: 760px) {
+            .sidebar { transform:translateX(-100%); transition:.2s; z-index:30; }
+            .sidebar.open { transform:translateX(0); }
+            .main-area { margin-left:0; width:100%; }
+            .mobile-menu { display:inline-block; }
+            .topbar { padding:0 16px; }
+            .content { padding:16px; }
+            .metric-grid, .grid-2, .detail-grid { grid-template-columns:1fr; }
+        }
+        @media print {
+            .sidebar, .topbar, .no-print, .message { display:none !important; }
+            .main-area { margin:0; width:100%; }
+            .content { padding:0; max-width:none; }
+            .card { border:0; box-shadow:none; padding:0; }
+            @page { size: Letter portrait; margin: 0.55in; }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="brand-mark">
+            <strong>CEO Office Day</strong>
+            <small>Scheduling System</small>
+        </div>
+
+        {% if session.role == 'ADMIN' %}
+            <a class="nav-link" href="{{ url_for('admin_dashboard') }}">Dashboard</a>
+            <a class="nav-link" href="{{ url_for('employee_master') }}">Employee Master</a>
+            <a class="nav-link" href="{{ url_for('store_master') }}">Store Master</a>
+            <a class="nav-link" href="{{ url_for('brand_master') }}">Brand Master</a>
+            <a class="nav-link" href="{{ url_for('user_management') }}">User Management</a>
+            <a class="nav-link" href="{{ url_for('hr_dashboard') }}">Office Day Requests</a>
+            <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>
+        {% elif session.role == 'HR' %}
+            <a class="nav-link" href="{{ url_for('hr_dashboard') }}">Dashboard / Requests</a>
+            <a class="nav-link" href="{{ url_for('employee_master') }}">Employee Master</a>
+            <a class="nav-link" href="{{ url_for('store_master') }}">Store Master</a>
+            <a class="nav-link" href="{{ url_for('brand_master') }}">Brand Master</a>
+            <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>
+        {% else %}
+            <a class="nav-link" href="{{ url_for('sales_dashboard') }}">Dashboard / Submit</a>
+            <a class="nav-link" href="{{ url_for('reports') }}">My Reports</a>
+        {% endif %}
+
+        <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+
+        <div class="sidebar-user">
+            <strong>{{ session.full_name }}</strong><br>
+            {{ session.role }}
+        </div>
+    </aside>
+
+    <div class="main-area">
+        <header class="topbar">
+            <div class="actions-inline">
+                <button class="btn btn-outline mobile-menu" id="menuButton" type="button">Menu</button>
+                <h1>{% block page_title %}Dashboard{% endblock %}</h1>
+            </div>
+            <div>{{ session.full_name }}</div>
+        </header>
+
+        <main class="content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+<script>
+    const menuButton = document.getElementById("menuButton");
+    const sidebar = document.getElementById("sidebar");
+    if (menuButton && sidebar) {
+        menuButton.addEventListener("click", () => sidebar.classList.toggle("open"));
+    }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

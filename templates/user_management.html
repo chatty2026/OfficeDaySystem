@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}User Management{% endblock %}
+{% block page_title %}User Management{% endblock %}
+{% block content %}
+<div class="grid-2">
+<div class="card">
+    <h2>Add / Edit User</h2>
+    <form method="POST" action="{{ url_for('save_user') }}" id="userForm">
+        <input type="hidden" name="user_id" id="user_id">
+        <label>Full Name</label><input name="full_name" id="full_name" required>
+        <label>Username</label><input name="username" id="username" required>
+        <label>Password</label><input type="password" name="password" id="password" minlength="8">
+        <p class="muted">For editing: leave password blank to keep the existing password.</p>
+        <label>Role</label>
+        <select name="role" id="role" required>
+            <option value="ADMIN">Admin</option><option value="HR">HR</option><option value="SALES">Sales</option>
+        </select>
+        <label>Status</label>
+        <select name="status" id="status"><option>Active</option><option>Inactive</option></select>
+        <div class="actions-inline">
+            <button class="btn" type="submit">Save User</button>
+            <button class="btn btn-secondary" type="button" id="clearUser">Clear</button>
+        </div>
+    </form>
+</div>
+<div class="card">
+    <h2>User Accounts</h2>
+    <p class="muted">You cannot delete the account currently logged in or the last remaining Admin account.</p>
+    <div class="table-wrap"><table>
+        <thead><tr><th>Full Name</th><th>Username</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.full_name }}</td><td>{{ user.username }}</td><td>{{ user.role }}</td><td>{{ user.status }}</td>
+            <td>
+                <div class="actions-inline">
+                    <button class="btn btn-outline edit-user" type="button"
+                        data-id="{{ user.id }}" data-name="{{ user.full_name }}"
+                        data-username="{{ user.username }}" data-role="{{ user.role }}"
+                        data-status="{{ user.status }}">Edit</button>
+                    {% if user.id != session.get('user_id') %}
+                    <form method="POST" action="{{ url_for('delete_user', user_id=user.id) }}"
+                          onsubmit="return confirm('Delete user account {{ user.username }}? This cannot be undone.');"
+                          style="display:inline; margin:0;">
+                        <button class="btn btn-danger" type="submit">Delete</button>
+                    </form>
+                    {% else %}
+                    <button class="btn btn-secondary" type="button" disabled>Current User</button>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll(".edit-user").forEach(btn => btn.addEventListener("click", () => {
+    document.getElementById("user_id").value = btn.dataset.id;
+    document.getElementById("full_name").value = btn.dataset.name;
+    document.getElementById("username").value = btn.dataset.username;
+    document.getElementById("role").value = btn.dataset.role;
+    document.getElementById("status").value = btn.dataset.status;
+    document.getElementById("password").value = "";
+    window.scrollTo({top:0,behavior:"smooth"});
+}));
+document.getElementById("clearUser").addEventListener("click", () => {
+    document.getElementById("userForm").reset();
+    document.getElementById("user_id").value = "";
+});
+</script>
+{% endblock %}

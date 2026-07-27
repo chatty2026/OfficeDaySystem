@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block page_title %}Admin Dashboard{% endblock %}
+{% block content %}
+<div class="metric-grid">
+    <div class="metric"><div class="value">{{ counts.employees }}</div><div class="label">Active Employees</div></div>
+    <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending Requests</div></div>
+    <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
+    <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active Users</div></div>
+</div>
+
+<div class="card">
+    <div class="section-head">
+        <h2>Recent Office Day Requests</h2>
+        <a class="btn" href="{{ url_for('hr_dashboard') }}">View All Requests</a>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Employee</th><th>Store</th><th>Date</th><th>Requested By</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for item in recent_requests %}
+                <tr>
+                    <td>{{ item.employee_name }}</td>
+                    <td>{{ item.store_assignment }}</td>
+                    <td>{{ item.requested_date }}</td>
+                    <td>{{ item.requested_by_name }}</td>
+                    <td><span class="badge">{{ item.status }}</span></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="muted">No requests yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

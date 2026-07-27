@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Sales Dashboard{% endblock %}
+{% block page_title %}Sales Dashboard{% endblock %}
+{% block content %}
+<div class="grid-2">
+    <div class="card">
+        <h2>Submit Office Day Request</h2>
+        <form method="POST" action="{{ url_for('submit_request') }}">
+            <label for="employee_id">Employee / Sales Personnel</label>
+            <select id="employee_id" name="employee_id" required>
+                <option value="">Select employee</option>
+                {% for employee in employees %}
+                    <option value="{{ employee.id }}">{{ employee_display_name(employee) }}</option>
+                {% endfor %}
+            </select>
+
+            <div class="grid-2">
+                <div><label>Company</label><input id="company_name" readonly></div>
+                <div><label>Position</label><input id="position" readonly></div>
+                <div><label>Brand</label><input id="brand" readonly></div>
+                <div><label>Store Assignment</label><input id="store_assignment" readonly></div>
+            </div>
+
+            <label for="requested_date">Office Day Date</label>
+            <input id="requested_date" type="date" name="requested_date" required>
+
+            <label for="purpose">Purpose</label>
+            <select id="purpose" name="purpose" required>
+                <option value="">Select purpose</option>
+                {% for purpose in purposes %}<option value="{{ purpose }}">{{ purpose }}</option>{% endfor %}
+            </select>
+
+            <div id="otherPurposeBox" style="display:none;">
+                <label for="other_purpose">Specify Other Purpose</label>
+                <input id="other_purpose" type="text" name="other_purpose">
+            </div>
+
+            <label for="remarks">Remarks</label>
+            <textarea id="remarks" name="remarks"></textarea>
+            <button class="btn" type="submit">Submit Request</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>My Requests</h2>
+        {% for item in office_requests %}
+            <div class="request-card">
+                <strong>{{ item.employee_name }}</strong><br>
+                <span class="muted">{{ item.store_assignment }} · {{ item.brand }}</span>
+                <p><strong>Requested Date:</strong> {{ item.requested_date }}</p>
+                {% if item.approved_date %}<p><strong>Approved/Adjusted Date:</strong> {{ item.approved_date }}</p>{% endif %}
+                <p><span class="badge">{{ item.status }}</span></p>
+                {% if item.hr_remarks %}<p><strong>HR Remarks:</strong> {{ item.hr_remarks }}</p>{% endif %}
+                {% if item.status == "Pending HR Approval" %}
+                <form method="POST"
+                      action="{{ url_for('delete_request', request_id=item.id) }}"
+                      onsubmit="return confirm('Delete this pending Office Day request? This cannot be undone.');"
+                      style="margin:0;">
+                    <input type="hidden" name="return_to" value="sales_dashboard">
+                    <button class="btn btn-danger" type="submit">Delete Request</button>
+                </form>
+                {% endif %}
+            </div>
+        {% else %}
+            <p class="muted">You have no submitted requests yet.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const employeeData = {{ employee_data | tojson }};
+    const employeeSelect = document.getElementById("employee_id");
+    const fields = ["company_name", "position", "brand", "store_assignment"];
+
+    employeeSelect.addEventListener("change", function () {
+        const record = employeeData[this.value] || {};
+        fields.forEach(field => {
+            document.getElementById(field).value = record[field] || "";
+        });
+    });
+
+    const purpose = document.getElementById("purpose");
+    const otherBox = document.getElementById("otherPurposeBox");
+    const otherInput = document.getElementById("other_purpose");
+    purpose.addEventListener("change", function () {
+        const show = this.value === "Other";
+        otherBox.style.display = show ? "block" : "none";
+        otherInput.required = show;
+        if (!show) otherInput.value = "";
+    });
+</script>
+{% endblock %}

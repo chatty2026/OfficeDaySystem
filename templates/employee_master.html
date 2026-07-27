@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Employee Master{% endblock %}
+{% block page_title %}Employee Master{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="section-head">
+        <h2>Add / Edit Employee</h2>
+        <div class="actions-inline">
+            <a class="btn btn-outline" href="{{ url_for('export_employees') }}">Export CSV</a>
+        </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('save_employee') }}" id="employeeForm">
+        <input type="hidden" name="employee_id" id="employee_id">
+        <div class="grid-3">
+            <div>
+                <label>Company Name</label>
+                <select name="company_name" id="company_name" required>
+                    <option value="">Select company</option>
+                    {% for company in companies %}<option value="{{ company }}">{{ company }}</option>{% endfor %}
+                </select>
+            </div>
+            <div><label>Last Name</label><input name="last_name" id="last_name" required></div>
+            <div><label>First Name</label><input name="first_name" id="first_name" required></div>
+            <div><label>Middle Name</label><input name="middle_name" id="middle_name"></div>
+            <div><label>Position</label><input name="position" id="position" required></div>
+            <div>
+                <label>Brand</label>
+                <select name="brand" id="brand" required>
+                    <option value="">Select brand</option>
+                    {% for brand in brands %}<option value="{{ brand.brand_name }}">{{ brand.brand_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Store Assignment</label>
+                <select name="store_assignment" id="store_assignment" required>
+                    <option value="">Select store</option>
+                    {% for store in stores %}<option value="{{ store.store_name }}">{{ store.store_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div><label>Date Hired</label><input type="date" name="date_hired" id="date_hired"></div>
+            <div>
+                <label>Status</label>
+                <select name="status" id="status"><option>Active</option><option>Inactive</option></select>
+            </div>
+        </div>
+        <label>Remarks</label>
+        <textarea name="remarks" id="remarks"></textarea>
+        <div class="actions-inline">
+            <button class="btn" type="submit">Save Employee</button>
+            <button class="btn btn-secondary" id="clearEmployee" type="button">Clear Form</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Import Employees</h2>
+    <p class="muted">CSV headers: Company Name, Last Name, First Name, Middle Name, Position, Brand, Store Assignment, Date Hired, Status, Remarks</p>
+    <form method="POST" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">
+        <input type="file" name="employee_csv" accept=".csv" required>
+        <button class="btn" type="submit">Import CSV</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Employee List</h2>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Name</th><th>Company</th><th>Position</th><th>Brand</th><th>Store</th><th>Date Hired</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for employee in employees %}
+                <tr>
+                    <td>{{ employee_display_name(employee) }}</td>
+                    <td>{{ employee.company_name }}</td>
+                    <td>{{ employee.position }}</td>
+                    <td>{{ employee.brand }}</td>
+                    <td>{{ employee.store_assignment }}</td>
+                    <td>{{ employee.date_hired or "-" }}</td>
+                    <td><span class="badge">{{ employee.status }}</span></td>
+                    <td>
+                        <div class="actions-inline">
+                            <button type="button" class="btn btn-outline edit-employee"
+                                    data-id="{{ employee.id }}">Edit</button>
+                            <form method="POST"
+                                  action="{{ url_for('delete_employee', employee_id=employee.id) }}"
+                                  onsubmit="return confirm('Delete employee {{ employee_display_name(employee) }}? This cannot be undone.');"
+                                  style="display:inline; margin:0;">
+                                <button class="btn btn-danger" type="submit">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8" class="muted">No employee records.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const formFields = [
+        "employee_id","company_name","last_name","first_name","middle_name",
+        "position","brand","store_assignment","date_hired","status","remarks"
+    ];
+    document.querySelectorAll(".edit-employee").forEach(button => {
+        button.addEventListener("click", async () => {
+            const response = await fetch(`/employees/${button.dataset.id}/json`);
+            const data = await response.json();
+            formFields.forEach(field => {
+                const element = document.getElementById(field);
+                if (element) element.value = data[field] || "";
+            });
+            window.scrollTo({top: 0, behavior: "smooth"});
+        });
+    });
+    document.getElementById("clearEmployee").addEventListener("click", () => {
+        document.getElementById("employeeForm").reset();
+        document.getElementById("employee_id").value = "";
+    });
+</script>
+{% endblock %}
