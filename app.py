@@ -6,6 +6,9 @@ import csv
 import io
 import os
 import sqlite3
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.errors import IntegrityError as PostgresIntegrityError
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -16,7 +19,9 @@ app.secret_key = os.environ.get(
 )
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DATABASE = os.path.join(BASE_DIR, "office_day.db")
+SQLITE_DATABASE = os.path.join(BASE_DIR, "office_day.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USING_POSTGRES = bool(DATABASE_URL)
 
 PURPOSES = [
     "Submit Report",
@@ -32,14 +37,47 @@ COMPANIES = [
 ]
 
 
+class DBConnection:
+    """Small compatibility wrapper so the existing Flask routes work on SQLite or PostgreSQL."""
+    def __init__(self):
+        if USING_POSTGRES:
+            self.raw = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        else:
+            self.raw = sqlite3.connect(SQLITE_DATABASE)
+            self.raw.row_factory = sqlite3.Row
+            self.raw.execute("PRAGMA foreign_keys = ON")
+
+    def execute(self, sql, params=()):
+        if USING_POSTGRES:
+            # Existing app uses SQLite-style ? placeholders.
+            sql = sql.replace("?", "%s")
+            # SQLite-specific case-insensitive collation is replaced by PostgreSQL comparisons.
+            sql = re.sub(r"\s+COLLATE\s+NOCASE", "", sql, flags=re.I)
+        return self.raw.execute(sql, params)
+
+    def commit(self):
+        return self.raw.commit()
+
+    def rollback(self):
+        return self.raw.rollback()
+
+    def close(self):
+        return self.raw.close()
+
+
 def get_db_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+    return DBConnection()
 
 
 def table_columns(connection, table_name):
+    if USING_POSTGRES:
+        rows = connection.execute("""
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = ?
+        """, (table_name,)).fetchall()
+        return {row["name"] for row in rows}
+
     return {
         row["name"]
         for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -47,49 +85,27 @@ def table_columns(connection, table_name):
 
 
 def table_exists(connection, table_name):
-    row = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,)
-    ).fetchone()
+    if USING_POSTGRES:
+        row = connection.execute("""
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = ?
+        """, (table_name,)).fetchone()
+    else:
+        row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        ).fetchone()
     return row is not None
 
 
 def migrate_users(connection):
-    if not table_exists(connection, "users"):
-        connection.execute("""
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('ADMIN', 'HR', 'SALES')),
-                status TEXT NOT NULL DEFAULT 'Active'
-                    CHECK(status IN ('Active', 'Inactive')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        return
-
-    sql = connection.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
-    ).fetchone()["sql"] or ""
-
-    columns = table_columns(connection, "users")
-    needs_rebuild = (
-        "ADMIN" not in sql
-        or "status" not in columns
-        or "is_active" in columns
-    )
-
-    if not needs_rebuild:
-        return
-
-    connection.execute("ALTER TABLE users RENAME TO users_old")
-    connection.execute("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
+        CREATE TABLE IF NOT EXISTS users (
+            id {id_type},
             full_name TEXT NOT NULL,
-            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            username TEXT NOT NULL UNIQUE,
             password TEXT NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('ADMIN', 'HR', 'SALES')),
             status TEXT NOT NULL DEFAULT 'Active'
@@ -98,45 +114,25 @@ def migrate_users(connection):
         )
     """)
 
-    old_columns = table_columns(connection, "users_old")
-    status_expression = (
-        "CASE WHEN is_active = 1 THEN 'Active' ELSE 'Inactive' END"
-        if "is_active" in old_columns else
-        "COALESCE(status, 'Active')"
-    )
-
-    connection.execute(f"""
-        INSERT INTO users (id, full_name, username, password, role, status)
-        SELECT
-            id,
-            full_name,
-            username,
-            password,
-            CASE
-                WHEN UPPER(role) = 'HR' THEN 'HR'
-                WHEN UPPER(role) = 'SALES' THEN 'SALES'
-                WHEN UPPER(role) = 'ADMIN' THEN 'ADMIN'
-                ELSE 'SALES'
-            END,
-            {status_expression}
-        FROM users_old
-    """)
-    connection.execute("DROP TABLE users_old")
+    columns = table_columns(connection, "users")
+    if "status" not in columns:
+        connection.execute(
+            "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'"
+        )
 
 
 def migrate_stores(connection):
-    if not table_exists(connection, "stores"):
-        connection.execute("""
-            CREATE TABLE stores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                store_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                status TEXT NOT NULL DEFAULT 'Active'
-                    CHECK(status IN ('Active', 'Inactive')),
-                remarks TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        return
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
+        CREATE TABLE IF NOT EXISTS stores (
+            id {id_type},
+            store_name TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'Active'
+                CHECK(status IN ('Active', 'Inactive')),
+            remarks TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     columns = table_columns(connection, "stores")
     if "status" not in columns:
@@ -148,19 +144,13 @@ def migrate_stores(connection):
     if "created_at" not in columns:
         connection.execute("ALTER TABLE stores ADD COLUMN created_at TIMESTAMP")
 
-    columns = table_columns(connection, "stores")
-    if "is_active" in columns:
-        connection.execute("""
-            UPDATE stores
-            SET status = CASE WHEN is_active = 1 THEN 'Active' ELSE 'Inactive' END
-        """)
-
 
 def migrate_brands(connection):
-    connection.execute("""
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
         CREATE TABLE IF NOT EXISTS brands (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            id {id_type},
+            brand_name TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'Active'
                 CHECK(status IN ('Active', 'Inactive')),
             remarks TEXT,
@@ -170,40 +160,10 @@ def migrate_brands(connection):
 
 
 def migrate_employees(connection):
-    desired = {
-        "id", "company_name", "last_name", "first_name", "middle_name",
-        "position", "brand", "store_assignment", "date_hired",
-        "status", "remarks", "created_at"
-    }
-
-    if not table_exists(connection, "employees"):
-        connection.execute("""
-            CREATE TABLE employees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                first_name TEXT NOT NULL,
-                middle_name TEXT,
-                position TEXT NOT NULL,
-                brand TEXT NOT NULL,
-                store_assignment TEXT NOT NULL,
-                date_hired TEXT,
-                status TEXT NOT NULL DEFAULT 'Active'
-                    CHECK(status IN ('Active', 'Inactive')),
-                remarks TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        return
-
-    columns = table_columns(connection, "employees")
-    if desired.issubset(columns):
-        return
-
-    connection.execute("ALTER TABLE employees RENAME TO employees_old")
-    connection.execute("""
-        CREATE TABLE employees (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
+        CREATE TABLE IF NOT EXISTS employees (
+            id {id_type},
             company_name TEXT NOT NULL,
             last_name TEXT NOT NULL,
             first_name TEXT NOT NULL,
@@ -219,80 +179,33 @@ def migrate_employees(connection):
         )
     """)
 
-    old_columns = table_columns(connection, "employees_old")
-    if "employee_name" in old_columns:
-        old_rows = connection.execute(
-            "SELECT id, employee_name, is_active FROM employees_old ORDER BY id"
-        ).fetchall()
-        for row in old_rows:
-            full_name = (row["employee_name"] or "").strip()
-            parts = full_name.split()
-            if len(parts) >= 2:
-                first_name = parts[0]
-                last_name = parts[-1]
-                middle_name = " ".join(parts[1:-1])
-            elif parts:
-                first_name = parts[0]
-                last_name = "-"
-                middle_name = ""
-            else:
-                first_name = "Unknown"
-                last_name = "-"
-
-            connection.execute("""
-                INSERT INTO employees (
-                    id, company_name, last_name, first_name, middle_name,
-                    position, brand, store_assignment, date_hired,
-                    status, remarks
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                row["id"],
-                "CONCEPT CLOTHING CO., INC.",
-                last_name,
-                first_name,
-                middle_name,
-                "Sales Personnel",
-                "UNASSIGNED",
-                "UNASSIGNED",
-                None,
-                "Active" if row["is_active"] == 1 else "Inactive",
-                "Migrated from Version 2. Please update employee details."
-            ))
-    else:
-        common = desired.intersection(old_columns)
-        # Rare fallback: leave old table intact as backup and start clean.
-
-    connection.execute("DROP TABLE employees_old")
-
 
 def migrate_requests(connection):
-    if not table_exists(connection, "office_day_requests"):
-        connection.execute("""
-            CREATE TABLE office_day_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                employee_id INTEGER,
-                employee_name TEXT NOT NULL,
-                company_name TEXT,
-                position TEXT,
-                store_assignment TEXT NOT NULL,
-                brand TEXT NOT NULL,
-                requested_date TEXT NOT NULL,
-                purpose TEXT NOT NULL,
-                other_purpose TEXT,
-                remarks TEXT,
-                requested_by INTEGER NOT NULL,
-                requested_by_name TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'Pending HR Approval',
-                approved_date TEXT,
-                hr_remarks TEXT,
-                hr_action_by TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (employee_id) REFERENCES employees(id),
-                FOREIGN KEY (requested_by) REFERENCES users(id)
-            )
-        """)
-        return
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
+        CREATE TABLE IF NOT EXISTS office_day_requests (
+            id {id_type},
+            employee_id INTEGER,
+            employee_name TEXT NOT NULL,
+            company_name TEXT,
+            position TEXT,
+            store_assignment TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            requested_date TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            other_purpose TEXT,
+            remarks TEXT,
+            requested_by INTEGER NOT NULL,
+            requested_by_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Pending HR Approval',
+            approved_date TEXT,
+            hr_remarks TEXT,
+            hr_action_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (employee_id) REFERENCES employees(id),
+            FOREIGN KEY (requested_by) REFERENCES users(id)
+        )
+    """)
 
     columns = table_columns(connection, "office_day_requests")
     additions = {
@@ -307,19 +220,10 @@ def migrate_requests(connection):
                 f"ALTER TABLE office_day_requests ADD COLUMN {column} {datatype}"
             )
 
-    columns = table_columns(connection, "office_day_requests")
-    if "adjustment_reason" in columns:
-        connection.execute("""
-            UPDATE office_day_requests
-            SET hr_remarks = COALESCE(hr_remarks, adjustment_reason)
-        """)
-
 
 def initialize_database():
     connection = get_db_connection()
     try:
-        connection.execute("PRAGMA foreign_keys = OFF")
-        connection.execute("PRAGMA legacy_alter_table = ON")
         migrate_users(connection)
         migrate_stores(connection)
         migrate_brands(connection)
@@ -331,13 +235,18 @@ def initialize_database():
             "ARROW", "VAN HEUSEN", "IZOD"
         ]
         for brand in default_brands:
-            connection.execute("""
-                INSERT OR IGNORE INTO brands (brand_name, status)
-                VALUES (?, 'Active')
-            """, (brand,))
+            if USING_POSTGRES:
+                connection.execute("""
+                    INSERT INTO brands (brand_name, status)
+                    VALUES (?, 'Active')
+                    ON CONFLICT (brand_name) DO NOTHING
+                """, (brand,))
+            else:
+                connection.execute("""
+                    INSERT OR IGNORE INTO brands (brand_name, status)
+                    VALUES (?, 'Active')
+                """, (brand,))
 
-        # Create starter accounts only for a completely empty users table.
-        # Once the system already has users, deleted dummy accounts will not be recreated.
         user_count = connection.execute(
             "SELECT COUNT(*) AS total FROM users"
         ).fetchone()["total"]
@@ -360,8 +269,10 @@ def initialize_database():
                 ))
 
         connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
-        connection.execute("PRAGMA foreign_keys = ON")
         connection.close()
 
 
@@ -439,7 +350,7 @@ def login():
         connection = get_db_connection()
         user = connection.execute("""
             SELECT * FROM users
-            WHERE username = ? COLLATE NOCASE AND status = 'Active'
+            WHERE LOWER(username)=LOWER(?) AND status = 'Active'
         """, (username,)).fetchone()
         connection.close()
 
@@ -943,9 +854,9 @@ def import_employees():
 
         duplicate = connection.execute("""
             SELECT id FROM employees
-            WHERE last_name=? COLLATE NOCASE
-              AND first_name=? COLLATE NOCASE
-              AND COALESCE(middle_name, '')=? COLLATE NOCASE
+            WHERE LOWER(last_name)=LOWER(?)
+              AND LOWER(first_name)=LOWER(?)
+              AND LOWER(COALESCE(middle_name, ''))=LOWER(?)
         """, (
             normalized["last_name"],
             normalized["first_name"],
@@ -1051,7 +962,8 @@ def save_store():
             message = "Store added successfully."
         connection.commit()
         flash(message, "success")
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, PostgresIntegrityError):
+        connection.rollback()
         flash("Store name already exists.", "error")
     finally:
         connection.close()
@@ -1076,7 +988,7 @@ def delete_store(store_id):
             """
             SELECT COUNT(*) AS total
             FROM employees
-            WHERE store_assignment = ? COLLATE NOCASE
+            WHERE LOWER(store_assignment)=LOWER(?)
             """,
             (store["store_name"],)
         ).fetchone()["total"]
@@ -1085,7 +997,7 @@ def delete_store(store_id):
             """
             SELECT COUNT(*) AS total
             FROM office_day_requests
-            WHERE store_assignment = ? COLLATE NOCASE
+            WHERE LOWER(store_assignment)=LOWER(?)
             """,
             (store["store_name"],)
         ).fetchone()["total"]
@@ -1152,7 +1064,7 @@ def import_stores():
                 status = "Active"
 
             duplicate = connection.execute(
-                "SELECT id FROM stores WHERE store_name=? COLLATE NOCASE",
+                "SELECT id FROM stores WHERE LOWER(store_name)=LOWER(?)",
                 (store_name,)
             ).fetchone()
             if duplicate:
@@ -1223,7 +1135,8 @@ def save_brand():
             message = "Brand added successfully."
         connection.commit()
         flash(message, "success")
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, PostgresIntegrityError):
+        connection.rollback()
         flash("Brand name already exists.", "error")
     finally:
         connection.close()
@@ -1248,7 +1161,7 @@ def delete_brand(brand_id):
             """
             SELECT COUNT(*) AS total
             FROM employees
-            WHERE brand = ? COLLATE NOCASE
+            WHERE LOWER(brand)=LOWER(?)
             """,
             (brand["brand_name"],)
         ).fetchone()["total"]
@@ -1257,7 +1170,7 @@ def delete_brand(brand_id):
             """
             SELECT COUNT(*) AS total
             FROM office_day_requests
-            WHERE brand = ? COLLATE NOCASE
+            WHERE LOWER(brand)=LOWER(?)
             """,
             (brand["brand_name"],)
         ).fetchone()["total"]
@@ -1378,7 +1291,8 @@ def save_user():
             message = "User account created successfully."
         connection.commit()
         flash(message, "success")
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, PostgresIntegrityError):
+        connection.rollback()
         flash("Username already exists.", "error")
     finally:
         connection.close()
@@ -1414,7 +1328,8 @@ def delete_user(user_id):
         connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
         connection.commit()
         flash(f'User account "{user["full_name"]}" deleted successfully.', "success")
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, PostgresIntegrityError):
+        connection.rollback()
         flash(
             "This account has linked records and cannot be permanently deleted. "
             "Set its status to Inactive instead.",
