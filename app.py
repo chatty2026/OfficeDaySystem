@@ -5,6 +5,7 @@ from flask import (
 import csv
 import io
 import os
+import re
 import sqlite3
 import psycopg
 from psycopg.rows import dict_row
