@@ -10,10 +10,6 @@ import sqlite3
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.errors import IntegrityError as PostgresIntegrityError
-
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -126,17 +122,6 @@ def migrate_users(connection):
         )
 
 
-
-def migrate_user_brands(connection):
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS user_brands (
-            user_id INTEGER NOT NULL,
-            brand_name TEXT NOT NULL,
-            PRIMARY KEY (user_id, brand_name),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-
 def migrate_stores(connection):
     id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     connection.execute(f"""
@@ -173,31 +158,6 @@ def migrate_brands(connection):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
-
-
-def migrate_companies(connection):
-    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    connection.execute(f"""
-        CREATE TABLE IF NOT EXISTS companies (
-            id {id_type},
-            company_name TEXT NOT NULL UNIQUE,
-            status TEXT NOT NULL DEFAULT 'Active'
-                CHECK(status IN ('Active', 'Inactive')),
-            remarks TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    columns = table_columns(connection, "companies")
-    if "status" not in columns:
-        connection.execute(
-            "ALTER TABLE companies ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'"
-        )
-    if "remarks" not in columns:
-        connection.execute("ALTER TABLE companies ADD COLUMN remarks TEXT")
-    if "created_at" not in columns:
-        connection.execute("ALTER TABLE companies ADD COLUMN created_at TIMESTAMP")
 
 
 def migrate_employees(connection):
@@ -266,10 +226,8 @@ def initialize_database():
     connection = get_db_connection()
     try:
         migrate_users(connection)
-        migrate_user_brands(connection)
         migrate_stores(connection)
         migrate_brands(connection)
-        migrate_companies(connection)
         migrate_employees(connection)
         migrate_requests(connection)
 
@@ -342,26 +300,6 @@ def roles_required(*allowed_roles):
             return view_function(*args, **kwargs)
         return decorated_function
     return decorator
-
-
-
-def get_user_brands(connection, user_id):
-    rows = connection.execute("""
-        SELECT brand_name
-        FROM user_brands
-        WHERE user_id=?
-        ORDER BY brand_name
-    """, (user_id,)).fetchall()
-    return [row["brand_name"] for row in rows]
-
-
-def replace_user_brands(connection, user_id, brand_names):
-    connection.execute("DELETE FROM user_brands WHERE user_id=?", (user_id,))
-    for brand_name in brand_names:
-        connection.execute("""
-            INSERT INTO user_brands (user_id, brand_name)
-            VALUES (?, ?)
-        """, (user_id, brand_name))
 
 
 def employee_display_name(row):
@@ -493,19 +431,11 @@ def hr_dashboard():
 @roles_required("SALES")
 def sales_dashboard():
     connection = get_db_connection()
-    assigned_brands = get_user_brands(connection, session["user_id"])
-
-    if assigned_brands:
-        placeholders = ", ".join(["?"] * len(assigned_brands))
-        employees = connection.execute(f"""
-            SELECT * FROM employees
-            WHERE status='Active'
-              AND LOWER(brand) IN ({placeholders})
-            ORDER BY last_name, first_name, middle_name
-        """, [brand.lower() for brand in assigned_brands]).fetchall()
-    else:
-        employees = []
-
+    employees = connection.execute("""
+        SELECT * FROM employees
+        WHERE status='Active'
+        ORDER BY last_name, first_name, middle_name
+    """).fetchall()
     office_requests = connection.execute("""
         SELECT * FROM office_day_requests
         WHERE requested_by = ?
@@ -527,9 +457,9 @@ def sales_dashboard():
         employees=employees,
         office_requests=office_requests,
         employee_data=employee_data,
-        purposes=PURPOSES,
-        assigned_brands=assigned_brands
+        purposes=PURPOSES
     )
+
 
 @app.route("/sales/submit-request", methods=["POST"])
 @roles_required("SALES")
@@ -549,7 +479,6 @@ def submit_request():
         return redirect(url_for("sales_dashboard"))
 
     connection = get_db_connection()
-    assigned_brands = get_user_brands(connection, session["user_id"])
     employee = connection.execute("""
         SELECT * FROM employees WHERE id=? AND status='Active'
     """, (employee_id,)).fetchone()
@@ -557,13 +486,6 @@ def submit_request():
     if employee is None:
         connection.close()
         flash("Selected employee is unavailable or inactive.", "error")
-        return redirect(url_for("sales_dashboard"))
-
-    if not assigned_brands or employee["brand"].strip().lower() not in {
-        brand.strip().lower() for brand in assigned_brands
-    }:
-        connection.close()
-        flash("You are not authorized to submit requests for this employee's brand.", "error")
         return redirect(url_for("sales_dashboard"))
 
     display_name = employee_display_name(employee)
@@ -729,50 +651,11 @@ def delete_request(request_id):
 @app.route("/employees")
 @roles_required("ADMIN", "HR")
 def employee_master():
-    search = request.args.get("search", "").strip()
-    company = request.args.get("company", "").strip()
-    brand = request.args.get("brand", "").strip()
-    store = request.args.get("store", "").strip()
-    status = request.args.get("status", "").strip()
-
     connection = get_db_connection()
-    query = "SELECT * FROM employees WHERE 1=1"
-    params = []
-
-    if search:
-        like_value = f"%{search}%"
-        query += """
-            AND (
-                LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(status, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(remarks, '')) LIKE LOWER(?)
-            )
-        """
-        params.extend([like_value] * 10)
-
-    if company:
-        query += " AND LOWER(company_name)=LOWER(?)"
-        params.append(company)
-    if brand:
-        query += " AND LOWER(brand)=LOWER(?)"
-        params.append(brand)
-    if store:
-        query += " AND LOWER(store_assignment)=LOWER(?)"
-        params.append(store)
-    if status in ("Active", "Inactive"):
-        query += " AND status=?"
-        params.append(status)
-
-    query += " ORDER BY last_name, first_name, middle_name"
-    employees = connection.execute(query, params).fetchall()
-
+    employees = connection.execute("""
+        SELECT * FROM employees
+        ORDER BY last_name, first_name, middle_name
+    """).fetchall()
     brands = connection.execute("""
         SELECT brand_name FROM brands WHERE status='Active'
         ORDER BY brand_name
@@ -781,20 +664,15 @@ def employee_master():
         SELECT store_name FROM stores WHERE status='Active'
         ORDER BY store_name
     """).fetchall()
-    company_rows = connection.execute("""
-        SELECT company_name FROM companies WHERE status='Active'
-        ORDER BY company_name
-    """).fetchall()
     connection.close()
-
     return render_template(
         "employee_master.html",
         employees=employees,
         brands=brands,
         stores=stores,
-        companies=[row["company_name"] for row in company_rows],
-        filters={"search": search, "company": company, "brand": brand, "store": store, "status": status}
+        companies=COMPANIES
     )
+
 
 @app.route("/employees/save", methods=["POST"])
 @roles_required("ADMIN", "HR")
@@ -929,498 +807,121 @@ def delete_employee(employee_id):
 @roles_required("ADMIN", "HR")
 def import_employees():
     uploaded_file = request.files.get("employee_csv")
-
-    if not uploaded_file:
-        flash("Please choose a valid employee file.", "error")
-        return redirect(url_for("employee_master"))
-
-    filename = uploaded_file.filename.lower()
-
-    if not filename.endswith((".csv", ".xlsx")):
-        flash("Please upload a CSV or Excel (.xlsx) file.", "error")
+    if not uploaded_file or not uploaded_file.filename.lower().endswith(".csv"):
+        flash("Please choose a valid employee CSV file.", "error")
         return redirect(url_for("employee_master"))
 
     try:
-        if filename.endswith(".csv"):
-            stream = io.StringIO(
-                uploaded_file.stream.read().decode("utf-8-sig"),
-                newline=""
-            )
-            reader = list(csv.DictReader(stream))
-
-        else:
-            workbook = load_workbook(uploaded_file, data_only=True)
-            worksheet = workbook.active
-
-            rows = list(worksheet.iter_rows(values_only=True))
-
-            if not rows:
-                flash("The Excel file is empty.", "error")
-                return redirect(url_for("employee_master"))
-
-            headers = [
-                str(value).strip() if value is not None else ""
-                for value in rows[0]
-            ]
-
-            reader = []
-
-            for values in rows[1:]:
-                raw = {}
-
-                for header, value in zip(headers, values):
-                    raw[header] = "" if value is None else str(value).strip()
-
-                reader.append(raw)
-
+        stream = io.StringIO(
+            uploaded_file.stream.read().decode("utf-8-sig"),
+            newline=""
+        )
+        reader = csv.DictReader(stream)
     except UnicodeDecodeError:
         flash("Please save the CSV using UTF-8 format.", "error")
         return redirect(url_for("employee_master"))
 
-    except Exception as e:
-        flash(f"Unable to read the uploaded file: {e}", "error")
-        return redirect(url_for("employee_master"))
-
     aliases = {
-        "no.": "ignore",
-        "no": "ignore",
-        "#": "ignore",
-
         "company": "company_name",
         "company name": "company_name",
-
-        "store": "store_assignment",
-        "store assignment": "store_assignment",
-
         "last name": "last_name",
         "first name": "first_name",
         "middle name": "middle_name",
-
         "position": "position",
         "brand": "brand",
+        "store": "store_assignment",
+        "store assignment": "store_assignment",
         "date hired": "date_hired",
         "status": "status",
         "remarks": "remarks"
     }
 
-    added = 0
-    updated = 0
-    skipped = 0
-
+    added = skipped = 0
     connection = get_db_connection()
+    for raw in reader:
+        normalized = {}
+        for key, value in raw.items():
+            mapped = aliases.get((key or "").strip().lower())
+            if mapped:
+                normalized[mapped] = (value or "").strip()
 
-    try:
-        for raw in reader:
-            normalized = {}
+        required = [
+            "company_name", "last_name", "first_name",
+            "position", "brand", "store_assignment"
+        ]
+        if any(not normalized.get(field) for field in required):
+            skipped += 1
+            continue
 
-            for key, value in raw.items():
-                mapped = aliases.get((key or "").strip().lower())
+        duplicate = connection.execute("""
+            SELECT id FROM employees
+            WHERE LOWER(last_name)=LOWER(?)
+              AND LOWER(first_name)=LOWER(?)
+              AND LOWER(COALESCE(middle_name, ''))=LOWER(?)
+        """, (
+            normalized["last_name"],
+            normalized["first_name"],
+            normalized.get("middle_name", "")
+        )).fetchone()
+        if duplicate:
+            skipped += 1
+            continue
 
-                if mapped and mapped != "ignore":
-                    normalized[mapped] = (
-                        "" if value is None else str(value).strip()
-                    )
+        connection.execute("""
+            INSERT INTO employees (
+                company_name, last_name, first_name, middle_name,
+                position, brand, store_assignment, date_hired,
+                status, remarks
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            normalized["company_name"], normalized["last_name"],
+            normalized["first_name"], normalized.get("middle_name", ""),
+            normalized["position"], normalized["brand"],
+            normalized["store_assignment"], normalized.get("date_hired") or None,
+            normalized.get("status") or "Active",
+            normalized.get("remarks", "")
+        ))
+        added += 1
 
-            required = [
-                "company_name",
-                "last_name",
-                "first_name",
-                "position",
-                "brand",
-                "store_assignment"
-            ]
-
-            if any(not normalized.get(field) for field in required):
-                skipped += 1
-                continue
-
-            status_value = (
-                normalized.get("status") or "Active"
-            ).title()
-
-            if status_value not in ("Active", "Inactive"):
-                status_value = "Active"
-
-            existing = connection.execute("""
-                SELECT id
-                FROM employees
-                WHERE LOWER(last_name)=LOWER(?)
-                  AND LOWER(first_name)=LOWER(?)
-                ORDER BY id
-                LIMIT 1
-            """, (
-                normalized["last_name"],
-                normalized["first_name"]
-            )).fetchone()
-
-            if existing:
-                connection.execute("""
-                    UPDATE employees
-                    SET company_name=?,
-                        last_name=?,
-                        first_name=?,
-                        middle_name=?,
-                        position=?,
-                        brand=?,
-                        store_assignment=?,
-                        date_hired=?,
-                        status=?,
-                        remarks=?
-                    WHERE id=?
-                """, (
-                    normalized["company_name"],
-                    normalized["last_name"],
-                    normalized["first_name"],
-                    normalized.get("middle_name", ""),
-                    normalized["position"],
-                    normalized["brand"],
-                    normalized["store_assignment"],
-                    normalized.get("date_hired") or None,
-                    status_value,
-                    normalized.get("remarks", ""),
-                    existing["id"]
-                ))
-
-                updated += 1
-
-            else:
-                connection.execute("""
-                    INSERT INTO employees (
-                        company_name,
-                        last_name,
-                        first_name,
-                        middle_name,
-                        position,
-                        brand,
-                        store_assignment,
-                        date_hired,
-                        status,
-                        remarks
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    normalized["company_name"],
-                    normalized["last_name"],
-                    normalized["first_name"],
-                    normalized.get("middle_name", ""),
-                    normalized["position"],
-                    normalized["brand"],
-                    normalized["store_assignment"],
-                    normalized.get("date_hired") or None,
-                    status_value,
-                    normalized.get("remarks", "")
-                ))
-
-                added += 1
-
-        connection.commit()
-
-    except Exception:
-        connection.rollback()
-        raise
-
-    finally:
-        connection.close()
-
+    connection.commit()
+    connection.close()
     flash(
-        f"Employee import completed: "
-        f"{added} added, {updated} updated, {skipped} skipped.",
+        f"Employee import completed: {added} added, {skipped} skipped.",
         "success"
     )
-
     return redirect(url_for("employee_master"))
 
 
 @app.route("/employees/export")
 @roles_required("ADMIN", "HR")
 def export_employees():
-    search = request.args.get("search", "").strip()
-    company = request.args.get("company", "").strip()
-    brand = request.args.get("brand", "").strip()
-    store = request.args.get("store", "").strip()
-    status = request.args.get("status", "").strip()
-
-    query = """
-        SELECT company_name, store_assignment, last_name, first_name,
-               middle_name, position, brand, date_hired, status
-        FROM employees
-        WHERE 1=1
-    """
-    params = []
-
-    if search:
-        like_value = f"%{search}%"
-        query += """
-            AND (
-                LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
-                OR LOWER(COALESCE(status, '')) LIKE LOWER(?)
-            )
-        """
-        params.extend([like_value] * 9)
-
-    if company:
-        query += " AND LOWER(company_name)=LOWER(?)"
-        params.append(company)
-    if brand:
-        query += " AND LOWER(brand)=LOWER(?)"
-        params.append(brand)
-    if store:
-        query += " AND LOWER(store_assignment)=LOWER(?)"
-        params.append(store)
-    if status in ("Active", "Inactive"):
-        query += " AND status=?"
-        params.append(status)
-
-    query += " ORDER BY last_name, first_name, middle_name"
-
     connection = get_db_connection()
-    rows = connection.execute(query, params).fetchall()
+    rows = connection.execute("""
+        SELECT company_name, last_name, first_name, middle_name,
+               position, brand, store_assignment, date_hired,
+               status, remarks
+        FROM employees ORDER BY last_name, first_name
+    """).fetchall()
     connection.close()
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Employee Master"
-
-    headers = [
-        "No.",
-        "Company Name",
-        "Store Assignment",
-        "Last Name",
-        "First Name",
-        "Middle Name",
-        "Position",
-        "Brand",
-        "Date Hired",
-        "Status"
-    ]
-    ws.append(headers)
-
-    thin = Side(style="thin")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = border
-
-    for number, row in enumerate(rows, start=1):
-        ws.append([
-            number,
-            row["company_name"],
-            row["store_assignment"],
-            row["last_name"],
-            row["first_name"],
-            row["middle_name"] or "",
-            row["position"],
-            row["brand"],
-            row["date_hired"] or "",
-            row["status"]
-        ])
-
-    for row in ws.iter_rows(min_row=2):
-        for cell in row:
-            cell.border = border
-            cell.alignment = Alignment(horizontal="left", vertical="center")
-
-        row[0].alignment = Alignment(horizontal="center", vertical="center")
-        row[5].alignment = Alignment(horizontal="center", vertical="center")
-        row[8].alignment = Alignment(horizontal="center", vertical="center")
-        row[9].alignment = Alignment(horizontal="center", vertical="center")
-
-    for column_cells in ws.columns:
-        max_length = 0
-        column_letter = get_column_letter(column_cells[0].column)
-        for cell in column_cells:
-            value = "" if cell.value is None else str(cell.value)
-            max_length = max(max_length, len(value))
-        ws.column_dimensions[column_letter].width = max_length + 3
-
-    ws.freeze_panes = "A2"
-    ws.row_dimensions[1].height = 22
-
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Company Name", "Last Name", "First Name", "Middle Name",
+        "Position", "Brand", "Store Assignment", "Date Hired",
+        "Status", "Remarks"
+    ])
+    for row in rows:
+        writer.writerow(list(row))
 
     return Response(
-        output.getvalue(),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv",
         headers={
             "Content-Disposition":
-            "attachment; filename=employee_master.xlsx"
+            "attachment; filename=employee_master.csv"
         }
-    )
-
-
-@app.route("/companies")
-@roles_required("ADMIN", "HR")
-def company_master():
-    connection = get_db_connection()
-    companies = connection.execute(
-        "SELECT * FROM companies ORDER BY company_name"
-    ).fetchall()
-    connection.close()
-    return render_template("company_master.html", companies=companies)
-
-
-@app.route("/companies/save", methods=["POST"])
-@roles_required("ADMIN", "HR")
-def save_company():
-    record_id = request.form.get("record_id", "").strip()
-    name = request.form.get("company_name", "").strip()
-    status = request.form.get("status", "Active").strip()
-    remarks = request.form.get("remarks", "").strip()
-
-    if not name:
-        flash("Company name is required.", "error")
-        return redirect(url_for("company_master"))
-
-    if status not in ("Active", "Inactive"):
-        status = "Active"
-
-    connection = get_db_connection()
-    try:
-        duplicate = connection.execute(
-            """
-            SELECT id
-            FROM companies
-            WHERE LOWER(company_name)=LOWER(?)
-              AND id <> ?
-            """,
-            (name, int(record_id) if record_id else 0)
-        ).fetchone()
-
-        if duplicate:
-            flash("Company name already exists.", "error")
-            return redirect(url_for("company_master"))
-
-        if record_id:
-            current = connection.execute(
-                "SELECT id, company_name FROM companies WHERE id=?",
-                (record_id,)
-            ).fetchone()
-
-            if current is None:
-                flash("Company record not found.", "error")
-                return redirect(url_for("company_master"))
-
-            if current["company_name"].strip().upper() != name:
-                employee_count = connection.execute(
-                    """
-                    SELECT COUNT(*) AS total
-                    FROM employees
-                    WHERE LOWER(company_name)=LOWER(?)
-                    """,
-                    (current["company_name"],)
-                ).fetchone()["total"]
-
-                request_count = connection.execute(
-                    """
-                    SELECT COUNT(*) AS total
-                    FROM office_day_requests
-                    WHERE LOWER(COALESCE(company_name, ''))=LOWER(?)
-                    """,
-                    (current["company_name"],)
-                ).fetchone()["total"]
-
-                if employee_count or request_count:
-                    flash(
-                        "This company is already linked to employee or Office Day records. "
-                        "To preserve history, its name cannot be changed. You may update "
-                        "its Status or Remarks instead.",
-                        "error"
-                    )
-                    return redirect(url_for("company_master"))
-
-            connection.execute("""
-                UPDATE companies
-                SET company_name=?, status=?, remarks=?
-                WHERE id=?
-            """, (name, status, remarks, record_id))
-            message = "Company updated successfully."
-        else:
-            connection.execute("""
-                INSERT INTO companies (company_name, status, remarks)
-                VALUES (?, ?, ?)
-            """, (name, status, remarks))
-            message = "Company added successfully."
-
-        connection.commit()
-        flash(message, "success")
-    except (sqlite3.IntegrityError, PostgresIntegrityError):
-        connection.rollback()
-        flash("Company name already exists.", "error")
-    finally:
-        connection.close()
-
-    return redirect(url_for("company_master"))
-
-
-@app.route("/companies/<int:company_id>/delete", methods=["POST"])
-@roles_required("ADMIN", "HR")
-def delete_company(company_id):
-    connection = get_db_connection()
-    try:
-        company = connection.execute(
-            "SELECT id, company_name FROM companies WHERE id=?",
-            (company_id,)
-        ).fetchone()
-
-        if company is None:
-            flash("Company record not found.", "error")
-            return redirect(url_for("company_master"))
-
-        employee_count = connection.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM employees
-            WHERE LOWER(company_name)=LOWER(?)
-            """,
-            (company["company_name"],)
-        ).fetchone()["total"]
-
-        request_count = connection.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM office_day_requests
-            WHERE LOWER(COALESCE(company_name, ''))=LOWER(?)
-            """,
-            (company["company_name"],)
-        ).fetchone()["total"]
-
-        if employee_count or request_count:
-            flash(
-                "This company is linked to employee or Office Day records and "
-                "cannot be permanently deleted. Set it to Inactive instead.",
-                "error"
-            )
-            return redirect(url_for("company_master"))
-
-        connection.execute("DELETE FROM companies WHERE id=?", (company_id,))
-        connection.commit()
-        flash(
-            f'Company "{company["company_name"]}" deleted successfully.',
-            "success"
-        )
-    finally:
-        connection.close()
-
-    return redirect(url_for("company_master"))
-
-
-@app.route("/companies/export")
-@roles_required("ADMIN", "HR")
-def export_companies():
-    return export_simple_master(
-        "companies", ["company_name", "status", "remarks"],
-        ["Company Name", "Status", "Remarks"], "company_master.csv"
     )
 
 
@@ -1703,7 +1204,7 @@ def export_brands():
 
 def export_simple_master(table, columns, headers, filename):
     connection = get_db_connection()
-    allowed = {"stores", "brands", "companies"}
+    allowed = {"stores", "brands"}
     if table not in allowed:
         connection.close()
         raise ValueError("Invalid table")
@@ -1733,28 +1234,9 @@ def user_management():
         SELECT id, full_name, username, role, status, created_at
         FROM users ORDER BY full_name
     """).fetchall()
-    brands = connection.execute("""
-        SELECT brand_name FROM brands
-        WHERE status='Active'
-        ORDER BY brand_name
-    """).fetchall()
-    assignment_rows = connection.execute("""
-        SELECT user_id, brand_name
-        FROM user_brands
-        ORDER BY brand_name
-    """).fetchall()
     connection.close()
+    return render_template("user_management.html", users=users)
 
-    user_brand_map = {}
-    for row in assignment_rows:
-        user_brand_map.setdefault(str(row["user_id"]), []).append(row["brand_name"])
-
-    return render_template(
-        "user_management.html",
-        users=users,
-        brands=brands,
-        user_brand_map=user_brand_map
-    )
 
 @app.route("/users/save", methods=["POST"])
 @roles_required("ADMIN")
@@ -1765,14 +1247,9 @@ def save_user():
     password = request.form.get("password", "")
     role = request.form.get("role", "").strip().upper()
     status = request.form.get("status", "Active").strip()
-    assigned_brands = [b.strip() for b in request.form.getlist("assigned_brands") if b.strip()]
 
     if not full_name or not username or role not in ("ADMIN", "HR", "SALES"):
         flash("Please complete all required user fields.", "error")
-        return redirect(url_for("user_management"))
-
-    if role == "SALES" and not assigned_brands:
-        flash("Please assign at least one brand to a Sales user.", "error")
         return redirect(url_for("user_management"))
 
     if not user_id and len(password) < 8:
@@ -1781,23 +1258,6 @@ def save_user():
 
     connection = get_db_connection()
     try:
-        if role == "SALES":
-            active_brand_rows = connection.execute("""
-                SELECT brand_name FROM brands WHERE status='Active'
-            """).fetchall()
-            active_brands = {row["brand_name"].strip().lower(): row["brand_name"] for row in active_brand_rows}
-            normalized_brands = []
-            for brand in assigned_brands:
-                canonical = active_brands.get(brand.lower())
-                if canonical and canonical not in normalized_brands:
-                    normalized_brands.append(canonical)
-            assigned_brands = normalized_brands
-            if not assigned_brands:
-                flash("Please assign at least one valid active brand to a Sales user.", "error")
-                return redirect(url_for("user_management"))
-        else:
-            assigned_brands = []
-
         if user_id:
             if password:
                 if len(password) < 8:
@@ -1818,10 +1278,9 @@ def save_user():
                     SET full_name=?, username=?, role=?, status=?
                     WHERE id=?
                 """, (full_name, username, role, status, user_id))
-            replace_user_brands(connection, int(user_id), assigned_brands)
             message = "User account updated successfully."
         else:
-            cursor = connection.execute("""
+            connection.execute("""
                 INSERT INTO users (
                     full_name, username, password, role, status
                 )
@@ -1830,15 +1289,6 @@ def save_user():
                 full_name, username, generate_password_hash(password),
                 role, status
             ))
-            if USING_POSTGRES:
-                new_user = connection.execute(
-                    "SELECT id FROM users WHERE LOWER(username)=LOWER(?)",
-                    (username,)
-                ).fetchone()
-                new_user_id = new_user["id"]
-            else:
-                new_user_id = cursor.lastrowid
-            replace_user_brands(connection, new_user_id, assigned_brands)
             message = "User account created successfully."
         connection.commit()
         flash(message, "success")
@@ -1876,7 +1326,6 @@ def delete_user(user_id):
                 flash("The last Admin account cannot be deleted.", "error")
                 return redirect(url_for("user_management"))
 
-        connection.execute("DELETE FROM user_brands WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
         connection.commit()
         flash(f'User account "{user["full_name"]}" deleted successfully.', "success")

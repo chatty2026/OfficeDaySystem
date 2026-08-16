@@ -52,10 +52,10 @@
 
 <div class="card">
     <h2>Import Employees</h2>
-    <p class="muted">CSV headers: Company Name, Last Name, First Name, Middle Name, Position, Brand, Store Assignment, Date Hired, Status, Remarks</p>
+    <p class="muted">Excel/CSV headers: No., Company Name, Store Assignment, Last Name, First Name, Middle Name, Position, Brand, Date Hired, Status</p>
     <form method="POST" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">
-        <input type="file" name="employee_csv" accept=".csv" required>
-        <button class="btn" type="submit">Import CSV</button>
+        <input type="file" name="employee_csv" accept=".xlsx,.csv" required>
+        <button class="btn" type="submit">Import Excel / CSV</button>
     </form>
 </div>
 
@@ -66,7 +66,7 @@
         <div class="actions-inline">
             <a class="btn btn-outline"
                href="{{ url_for('export_employees', search=filters.search, company=filters.company, brand=filters.brand, store=filters.store, status=filters.status) }}">
-                Export Filtered CSV
+                Export Filtered Excel
             </a>
             <button class="btn btn-outline" type="button" onclick="printEmployeeList()">Print Employee List</button>
         </div>
@@ -163,10 +163,34 @@
     Total Employees: {{ employees|length }} &nbsp; Date Printed: <span id="printDate"></span>
   </p>
   <table>
-    <thead><tr><th>No.</th><th>Name</th><th>Company</th><th>Position</th><th>Brand</th><th>Store</th><th>Date Hired</th><th>Status</th></tr></thead>
+    <thead>
+      <tr>
+        <th>No.</th>
+        <th>Company Name</th>
+        <th>Store Assignment</th>
+        <th>Last Name</th>
+        <th>First Name</th>
+        <th>Middle Name</th>
+        <th>Position</th>
+        <th>Brand</th>
+        <th>Date Hired</th>
+        <th>Status</th>
+      </tr>
+    </thead>
     <tbody>
     {% for employee in employees %}
-      <tr><td>{{ loop.index }}</td><td>{{ employee_display_name(employee) }}</td><td>{{ employee.company_name }}</td><td>{{ employee.position }}</td><td>{{ employee.brand }}</td><td>{{ employee.store_assignment }}</td><td>{{ employee.date_hired or "-" }}</td><td>{{ employee.status }}</td></tr>
+      <tr>
+        <td class="center">{{ loop.index }}</td>
+        <td>{{ employee.company_name }}</td>
+        <td>{{ employee.store_assignment }}</td>
+        <td>{{ employee.last_name }}</td>
+        <td>{{ employee.first_name }}</td>
+        <td class="center">{{ employee.middle_name or "" }}</td>
+        <td>{{ employee.position }}</td>
+        <td>{{ employee.brand }}</td>
+        <td class="center print-date-hired" data-date="{{ employee.date_hired or '' }}">{{ employee.date_hired or "-" }}</td>
+        <td class="center">{{ employee.status }}</td>
+      </tr>
     {% endfor %}
     </tbody>
   </table>
@@ -181,6 +205,8 @@
  #employeePrintReport p { font-size:9px; }
  #employeePrintReport table { width:100%; border-collapse:collapse; font-size:8px; }
  #employeePrintReport th,#employeePrintReport td { border:1px solid #000; padding:3px 4px; text-align:left; }
+ #employeePrintReport th { text-align:center; font-weight:bold; vertical-align:middle; }
+ #employeePrintReport td.center { text-align:center; }
  #employeePrintReport thead { display:table-header-group; }
  #employeePrintReport tr { page-break-inside:avoid; }
 }
@@ -189,8 +215,36 @@
 {% endblock %}
 {% block scripts %}
 <script>
+    function formatPrintDate(value) {
+        if (!value) return "-";
+        const parts = String(value).split("-");
+        if (parts.length !== 3) return value;
+
+        const year = parts[0];
+        const month = Number(parts[1]);
+        const day = parts[2];
+
+        const months = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        ];
+
+        if (month < 1 || month > 12) return value;
+        return `${day}-${months[month - 1]}-${year}`;
+    }
+
     function printEmployeeList() {
-        document.getElementById("printDate").textContent = new Date().toLocaleDateString();
+        document.querySelectorAll(".print-date-hired").forEach(cell => {
+            cell.textContent = formatPrintDate(cell.dataset.date);
+        });
+
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, "0");
+        const dd = String(today.getDate()).padStart(2, "0");
+        document.getElementById("printDate").textContent =
+            formatPrintDate(`${yyyy}-${mm}-${dd}`);
+
         window.print();
     }
 
