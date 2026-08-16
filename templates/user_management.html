@@ -15,6 +15,15 @@
         <select name="role" id="role" required>
             <option value="ADMIN">Admin</option><option value="HR">HR</option><option value="SALES">Sales</option>
         </select>
+        <div id="brandAccessBox" style="display:none;">
+            <label>Assigned Brand(s)</label>
+            <select name="assigned_brands" id="assigned_brands" multiple size="7">
+                {% for brand in brands %}
+                <option value="{{ brand.brand_name }}">{{ brand.brand_name }}</option>
+                {% endfor %}
+            </select>
+            <p class="muted">Sales users will only see active employees under the selected brand(s). Hold Ctrl (Windows) or Command (Mac) to select multiple brands.</p>
+        </div>
         <label>Status</label>
         <select name="status" id="status"><option>Active</option><option>Inactive</option></select>
         <div class="actions-inline">
@@ -27,16 +36,22 @@
     <h2>User Accounts</h2>
     <p class="muted">You cannot delete the account currently logged in or the last remaining Admin account.</p>
     <div class="table-wrap"><table>
-        <thead><tr><th>Full Name</th><th>Username</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Full Name</th><th>Username</th><th>Role</th><th>Assigned Brand(s)</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
         {% for user in users %}
         <tr>
-            <td>{{ user.full_name }}</td><td>{{ user.username }}</td><td>{{ user.role }}</td><td>{{ user.status }}</td>
+            <td>{{ user.full_name }}</td><td>{{ user.username }}</td><td>{{ user.role }}</td>
+            <td>
+                {% set assigned = user_brand_map.get(user.id|string, []) %}
+                {{ assigned|join(", ") if assigned else "—" }}
+            </td>
+            <td>{{ user.status }}</td>
             <td>
                 <div class="actions-inline">
                     <button class="btn btn-outline edit-user" type="button"
                         data-id="{{ user.id }}" data-name="{{ user.full_name }}"
                         data-username="{{ user.username }}" data-role="{{ user.role }}"
+                        data-brands="{{ user_brand_map.get(user.id|string, [])|join('||') }}"
                         data-status="{{ user.status }}">Edit</button>
                     {% if user.id != session.get('user_id') %}
                     <form method="POST" action="{{ url_for('delete_user', user_id=user.id) }}"
@@ -58,6 +73,21 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const roleSelect = document.getElementById("role");
+const brandAccessBox = document.getElementById("brandAccessBox");
+const brandSelect = document.getElementById("assigned_brands");
+
+function updateBrandAccess() {
+    const isSales = roleSelect.value === "SALES";
+    brandAccessBox.style.display = isSales ? "block" : "none";
+    brandSelect.required = isSales;
+    if (!isSales) {
+        Array.from(brandSelect.options).forEach(option => option.selected = false);
+    }
+}
+
+roleSelect.addEventListener("change", updateBrandAccess);
+
 document.querySelectorAll(".edit-user").forEach(btn => btn.addEventListener("click", () => {
     document.getElementById("user_id").value = btn.dataset.id;
     document.getElementById("full_name").value = btn.dataset.name;
@@ -65,11 +95,22 @@ document.querySelectorAll(".edit-user").forEach(btn => btn.addEventListener("cli
     document.getElementById("role").value = btn.dataset.role;
     document.getElementById("status").value = btn.dataset.status;
     document.getElementById("password").value = "";
+
+    const assigned = (btn.dataset.brands || "").split("||").filter(Boolean);
+    Array.from(brandSelect.options).forEach(option => {
+        option.selected = assigned.includes(option.value);
+    });
+    updateBrandAccess();
     window.scrollTo({top:0,behavior:"smooth"});
 }));
+
 document.getElementById("clearUser").addEventListener("click", () => {
     document.getElementById("userForm").reset();
     document.getElementById("user_id").value = "";
+    Array.from(brandSelect.options).forEach(option => option.selected = false);
+    updateBrandAccess();
 });
+
+updateBrandAccess();
 </script>
 {% endblock %}

@@ -122,6 +122,17 @@ def migrate_users(connection):
         )
 
 
+
+def migrate_user_brands(connection):
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS user_brands (
+            user_id INTEGER NOT NULL,
+            brand_name TEXT NOT NULL,
+            PRIMARY KEY (user_id, brand_name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
 def migrate_stores(connection):
     id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     connection.execute(f"""
@@ -251,6 +262,7 @@ def initialize_database():
     connection = get_db_connection()
     try:
         migrate_users(connection)
+        migrate_user_brands(connection)
         migrate_stores(connection)
         migrate_brands(connection)
         migrate_companies(connection)
@@ -326,6 +338,26 @@ def roles_required(*allowed_roles):
             return view_function(*args, **kwargs)
         return decorated_function
     return decorator
+
+
+
+def get_user_brands(connection, user_id):
+    rows = connection.execute("""
+        SELECT brand_name
+        FROM user_brands
+        WHERE user_id=?
+        ORDER BY brand_name
+    """, (user_id,)).fetchall()
+    return [row["brand_name"] for row in rows]
+
+
+def replace_user_brands(connection, user_id, brand_names):
+    connection.execute("DELETE FROM user_brands WHERE user_id=?", (user_id,))
+    for brand_name in brand_names:
+        connection.execute("""
+            INSERT INTO user_brands (user_id, brand_name)
+            VALUES (?, ?)
+        """, (user_id, brand_name))
 
 
 def employee_display_name(row):
@@ -457,11 +489,19 @@ def hr_dashboard():
 @roles_required("SALES")
 def sales_dashboard():
     connection = get_db_connection()
-    employees = connection.execute("""
-        SELECT * FROM employees
-        WHERE status='Active'
-        ORDER BY last_name, first_name, middle_name
-    """).fetchall()
+    assigned_brands = get_user_brands(connection, session["user_id"])
+
+    if assigned_brands:
+        placeholders = ", ".join(["?"] * len(assigned_brands))
+        employees = connection.execute(f"""
+            SELECT * FROM employees
+            WHERE status='Active'
+              AND LOWER(brand) IN ({placeholders})
+            ORDER BY last_name, first_name, middle_name
+        """, [brand.lower() for brand in assigned_brands]).fetchall()
+    else:
+        employees = []
+
     office_requests = connection.execute("""
         SELECT * FROM office_day_requests
         WHERE requested_by = ?
@@ -483,9 +523,9 @@ def sales_dashboard():
         employees=employees,
         office_requests=office_requests,
         employee_data=employee_data,
-        purposes=PURPOSES
+        purposes=PURPOSES,
+        assigned_brands=assigned_brands
     )
-
 
 @app.route("/sales/submit-request", methods=["POST"])
 @roles_required("SALES")
@@ -505,6 +545,7 @@ def submit_request():
         return redirect(url_for("sales_dashboard"))
 
     connection = get_db_connection()
+    assigned_brands = get_user_brands(connection, session["user_id"])
     employee = connection.execute("""
         SELECT * FROM employees WHERE id=? AND status='Active'
     """, (employee_id,)).fetchone()
@@ -512,6 +553,13 @@ def submit_request():
     if employee is None:
         connection.close()
         flash("Selected employee is unavailable or inactive.", "error")
+        return redirect(url_for("sales_dashboard"))
+
+    if not assigned_brands or employee["brand"].strip().lower() not in {
+        brand.strip().lower() for brand in assigned_brands
+    }:
+        connection.close()
+        flash("You are not authorized to submit requests for this employee's brand.", "error")
         return redirect(url_for("sales_dashboard"))
 
     display_name = employee_display_name(employee)
@@ -1550,9 +1598,28 @@ def user_management():
         SELECT id, full_name, username, role, status, created_at
         FROM users ORDER BY full_name
     """).fetchall()
+    brands = connection.execute("""
+        SELECT brand_name FROM brands
+        WHERE status='Active'
+        ORDER BY brand_name
+    """).fetchall()
+    assignment_rows = connection.execute("""
+        SELECT user_id, brand_name
+        FROM user_brands
+        ORDER BY brand_name
+    """).fetchall()
     connection.close()
-    return render_template("user_management.html", users=users)
 
+    user_brand_map = {}
+    for row in assignment_rows:
+        user_brand_map.setdefault(str(row["user_id"]), []).append(row["brand_name"])
+
+    return render_template(
+        "user_management.html",
+        users=users,
+        brands=brands,
+        user_brand_map=user_brand_map
+    )
 
 @app.route("/users/save", methods=["POST"])
 @roles_required("ADMIN")
@@ -1563,9 +1630,14 @@ def save_user():
     password = request.form.get("password", "")
     role = request.form.get("role", "").strip().upper()
     status = request.form.get("status", "Active").strip()
+    assigned_brands = [b.strip() for b in request.form.getlist("assigned_brands") if b.strip()]
 
     if not full_name or not username or role not in ("ADMIN", "HR", "SALES"):
         flash("Please complete all required user fields.", "error")
+        return redirect(url_for("user_management"))
+
+    if role == "SALES" and not assigned_brands:
+        flash("Please assign at least one brand to a Sales user.", "error")
         return redirect(url_for("user_management"))
 
     if not user_id and len(password) < 8:
@@ -1574,6 +1646,23 @@ def save_user():
 
     connection = get_db_connection()
     try:
+        if role == "SALES":
+            active_brand_rows = connection.execute("""
+                SELECT brand_name FROM brands WHERE status='Active'
+            """).fetchall()
+            active_brands = {row["brand_name"].strip().lower(): row["brand_name"] for row in active_brand_rows}
+            normalized_brands = []
+            for brand in assigned_brands:
+                canonical = active_brands.get(brand.lower())
+                if canonical and canonical not in normalized_brands:
+                    normalized_brands.append(canonical)
+            assigned_brands = normalized_brands
+            if not assigned_brands:
+                flash("Please assign at least one valid active brand to a Sales user.", "error")
+                return redirect(url_for("user_management"))
+        else:
+            assigned_brands = []
+
         if user_id:
             if password:
                 if len(password) < 8:
@@ -1594,9 +1683,10 @@ def save_user():
                     SET full_name=?, username=?, role=?, status=?
                     WHERE id=?
                 """, (full_name, username, role, status, user_id))
+            replace_user_brands(connection, int(user_id), assigned_brands)
             message = "User account updated successfully."
         else:
-            connection.execute("""
+            cursor = connection.execute("""
                 INSERT INTO users (
                     full_name, username, password, role, status
                 )
@@ -1605,6 +1695,15 @@ def save_user():
                 full_name, username, generate_password_hash(password),
                 role, status
             ))
+            if USING_POSTGRES:
+                new_user = connection.execute(
+                    "SELECT id FROM users WHERE LOWER(username)=LOWER(?)",
+                    (username,)
+                ).fetchone()
+                new_user_id = new_user["id"]
+            else:
+                new_user_id = cursor.lastrowid
+            replace_user_brands(connection, new_user_id, assigned_brands)
             message = "User account created successfully."
         connection.commit()
         flash(message, "success")
@@ -1642,6 +1741,7 @@ def delete_user(user_id):
                 flash("The last Admin account cannot be deleted.", "error")
                 return redirect(url_for("user_management"))
 
+        connection.execute("DELETE FROM user_brands WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
         connection.commit()
         flash(f'User account "{user["full_name"]}" deleted successfully.', "success")

@@ -68,6 +68,7 @@
                href="{{ url_for('export_employees', search=filters.search, company=filters.company, brand=filters.brand, store=filters.store, status=filters.status) }}">
                 Export Filtered CSV
             </a>
+            <button class="btn btn-outline" type="button" onclick="printEmployeeList()">Print Employee List</button>
         </div>
     </div>
     <form method="GET" action="{{ url_for('employee_master') }}">
@@ -151,9 +152,48 @@
         </table>
     </div>
 </div>
+
+<div id="employeePrintReport" style="display:none">
+  <h1>EMPLOYEE MASTERLIST</h1>
+  <p>
+    {% if filters.company %}Company: {{ filters.company }} &nbsp;{% endif %}
+    {% if filters.brand %}Brand: {{ filters.brand }} &nbsp;{% endif %}
+    {% if filters.store %}Store: {{ filters.store }} &nbsp;{% endif %}
+    {% if filters.status %}Status: {{ filters.status }} &nbsp;{% endif %}
+    Total Employees: {{ employees|length }} &nbsp; Date Printed: <span id="printDate"></span>
+  </p>
+  <table>
+    <thead><tr><th>No.</th><th>Name</th><th>Company</th><th>Position</th><th>Brand</th><th>Store</th><th>Date Hired</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for employee in employees %}
+      <tr><td>{{ loop.index }}</td><td>{{ employee_display_name(employee) }}</td><td>{{ employee.company_name }}</td><td>{{ employee.position }}</td><td>{{ employee.brand }}</td><td>{{ employee.store_assignment }}</td><td>{{ employee.date_hired or "-" }}</td><td>{{ employee.status }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+@media print {
+ @page { size:Letter landscape; margin:0.4in; }
+ body * { visibility:hidden !important; }
+ #employeePrintReport,#employeePrintReport * { visibility:visible !important; }
+ #employeePrintReport { display:block !important; position:absolute; left:0; top:0; width:100%; font-family:Arial,sans-serif; color:#000; }
+ #employeePrintReport h1 { text-align:center; font-size:18px; margin:0 0 6px; }
+ #employeePrintReport p { font-size:9px; }
+ #employeePrintReport table { width:100%; border-collapse:collapse; font-size:8px; }
+ #employeePrintReport th,#employeePrintReport td { border:1px solid #000; padding:3px 4px; text-align:left; }
+ #employeePrintReport thead { display:table-header-group; }
+ #employeePrintReport tr { page-break-inside:avoid; }
+}
+</style>
+
 {% endblock %}
 {% block scripts %}
 <script>
+    function printEmployeeList() {
+        document.getElementById("printDate").textContent = new Date().toLocaleDateString();
+        window.print();
+    }
+
     const formFields = [
         "employee_id","company_name","last_name","first_name","middle_name",
         "position","brand","store_assignment","date_hired","status","remarks"

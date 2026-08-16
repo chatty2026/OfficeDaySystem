@@ -5,6 +5,11 @@
 <div class="grid-2">
     <div class="card">
         <h2>Submit Office Day Request</h2>
+        {% if assigned_brands %}
+        <p class="muted"><strong>Brand Access:</strong> {{ assigned_brands|join(", ") }}</p>
+        {% else %}
+        <p class="muted"><strong>No brand access assigned.</strong> Please contact the Administrator.</p>
+        {% endif %}
         <form method="POST" action="{{ url_for('submit_request') }}">
             <label for="employee_id">Employee / Sales Personnel</label>
             <select id="employee_id" name="employee_id" required>
@@ -37,7 +42,7 @@
 
             <label for="remarks">Remarks</label>
             <textarea id="remarks" name="remarks"></textarea>
-            <button class="btn" type="submit">Submit Request</button>
+            <button class="btn" type="submit" {% if not assigned_brands %}disabled{% endif %}>Submit Request</button>
         </form>
     </div>
 
