@@ -383,6 +383,18 @@ def format_date_only(value):
     return text.split(" ")[0]
 
 
+def format_rows_for_display(rows, date_fields):
+    """Return display-only dictionaries with selected date fields formatted as DD-MMM-YYYY."""
+    formatted_rows = []
+    for row in rows:
+        item = dict(row)
+        for field in date_fields:
+            if field in item:
+                item[field] = format_date_only(item[field])
+        formatted_rows.append(item)
+    return formatted_rows
+
+
 def fetch_dashboard_counts(connection):
     return {
         "employees": connection.execute(
@@ -471,6 +483,9 @@ def admin_dashboard():
     recent_requests = connection.execute("""
         SELECT * FROM office_day_requests ORDER BY created_at DESC LIMIT 8
     """).fetchall()
+    recent_requests = format_rows_for_display(
+        recent_requests, ("requested_date", "approved_date", "created_at")
+    )
     connection.close()
     return render_template(
         "admin_dashboard.html",
@@ -495,6 +510,9 @@ def hr_dashboard():
             END,
             created_at DESC
     """).fetchall()
+    office_requests = format_rows_for_display(
+        office_requests, ("requested_date", "approved_date", "created_at")
+    )
     connection.close()
     return render_template(
         "hr_dashboard.html",
@@ -546,6 +564,9 @@ def sales_office_day():
     office_requests = connection.execute("""
         SELECT * FROM office_day_requests WHERE requested_by=? ORDER BY created_at DESC
     """, (session["user_id"],)).fetchall()
+    office_requests = format_rows_for_display(
+        office_requests, ("requested_date", "approved_date", "created_at")
+    )
     connection.close()
     employee_data = {str(r["id"]): {"company_name":r["company_name"], "position":r["position"],
                     "brand":r["brand"], "store_assignment":r["store_assignment"]} for r in employees}
@@ -568,6 +589,7 @@ def sales_employee_master():
         if brand and brand.lower() in {b.lower() for b in assigned_brands}: query += " AND LOWER(brand)=LOWER(?)"; params.append(brand)
         if store: query += " AND LOWER(store_assignment)=LOWER(?)"; params.append(store)
         query += " ORDER BY last_name, first_name, middle_name"; employees=connection.execute(query,params).fetchall()
+        employees = format_rows_for_display(employees, ("date_hired", "created_at"))
         stores=[r["store_assignment"] for r in connection.execute(f"SELECT DISTINCT store_assignment FROM employees WHERE status='Active' AND LOWER(brand) IN ({placeholders}) ORDER BY store_assignment",[b.lower() for b in assigned_brands]).fetchall()]
     connection.close()
     return render_template("sales_employee_master.html", employees=employees, assigned_brands=assigned_brands,
@@ -842,6 +864,7 @@ def employee_master():
 
     query += " ORDER BY last_name, first_name, middle_name"
     employees = connection.execute(query, params).fetchall()
+    employees = format_rows_for_display(employees, ("date_hired", "created_at"))
 
     brands = connection.execute("""
         SELECT brand_name FROM brands WHERE status='Active'
@@ -1290,7 +1313,7 @@ def export_employees():
             row["middle_name"] or "",
             row["position"],
             row["brand"],
-            row["date_hired"] or "",
+            format_date_only(row["date_hired"]) if row["date_hired"] else "",
             row["status"]
         ])
 
@@ -1970,6 +1993,7 @@ def reports():
 
         query += " ORDER BY requested_date, employee_name"
         rows = connection.execute(query, params).fetchall()
+        rows = format_rows_for_display(rows, ("requested_date", "approved_date", "created_at"))
         connection.close()
 
     return render_template(
@@ -1995,7 +2019,7 @@ def export_reports_excel():
     for c in ws[1]: c.font=Font(bold=True); c.alignment=Alignment(horizontal="center"); c.border=border
     for r in rows:
         purpose=r["purpose"] + ((": "+r["other_purpose"]) if r["other_purpose"] else "")
-        ws.append([r["requested_date"],r["employee_name"],r["company_name"] or "-",r["position"] or "-",r["brand"],r["store_assignment"],purpose,r["status"],r["approved_date"] or "-"])
+        ws.append([format_date_only(r["requested_date"]),r["employee_name"],r["company_name"] or "-",r["position"] or "-",r["brand"],r["store_assignment"],purpose,r["status"],format_date_only(r["approved_date"]) if r["approved_date"] else "-"])
     for row in ws.iter_rows(min_row=2):
         for c in row: c.border=border
     for col in ws.columns: ws.column_dimensions[get_column_letter(col[0].column)].width=min(max(len(str(c.value or "")) for c in col)+3,45)
