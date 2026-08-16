@@ -5,9 +5,6 @@
 <div class="card">
     <div class="section-head">
         <h2>Add / Edit Employee</h2>
-        <div class="actions-inline">
-            <a class="btn btn-outline" href="{{ url_for('export_employees') }}">Export CSV</a>
-        </div>
     </div>
 
     <form method="POST" action="{{ url_for('save_employee') }}" id="employeeForm">
@@ -62,8 +59,65 @@
     </form>
 </div>
 
+
 <div class="card">
-    <h2>Employee List</h2>
+    <div class="section-head">
+        <h2>Search / Filter Employees</h2>
+        <div class="actions-inline">
+            <a class="btn btn-outline"
+               href="{{ url_for('export_employees', search=filters.search, company=filters.company, brand=filters.brand, store=filters.store, status=filters.status) }}">
+                Export Filtered CSV
+            </a>
+        </div>
+    </div>
+    <form method="GET" action="{{ url_for('employee_master') }}">
+        <div class="grid-3">
+            <div>
+                <label>Search Any Word</label>
+                <input name="search" value="{{ filters.search }}" placeholder="Name, company, position, brand, store, status, remarks...">
+            </div>
+            <div>
+                <label>Company</label>
+                <select name="company">
+                    <option value="">All Companies</option>
+                    {% for company in companies %}<option value="{{ company }}" {% if filters.company == company %}selected{% endif %}>{{ company }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Brand</label>
+                <select name="brand">
+                    <option value="">All Brands</option>
+                    {% for brand in brands %}<option value="{{ brand.brand_name }}" {% if filters.brand == brand.brand_name %}selected{% endif %}>{{ brand.brand_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Store</label>
+                <select name="store">
+                    <option value="">All Stores</option>
+                    {% for store in stores %}<option value="{{ store.store_name }}" {% if filters.store == store.store_name %}selected{% endif %}>{{ store.store_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Status</label>
+                <select name="status">
+                    <option value="">All Statuses</option>
+                    <option value="Active" {% if filters.status == "Active" %}selected{% endif %}>Active</option>
+                    <option value="Inactive" {% if filters.status == "Inactive" %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+        </div>
+        <div class="actions-inline">
+            <button class="btn" type="submit">Apply Filters</button>
+            <a class="btn btn-secondary" href="{{ url_for('employee_master') }}">Clear Filters</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="section-head">
+        <h2>Employee List</h2>
+        <span class="muted">{{ employees|length }} record(s) shown</span>
+    </div>
     <div class="table-wrap">
         <table>
             <thead><tr><th>Name</th><th>Company</th><th>Position</th><th>Brand</th><th>Store</th><th>Date Hired</th><th>Status</th><th>Action</th></tr></thead>

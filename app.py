@@ -677,11 +677,50 @@ def delete_request(request_id):
 @app.route("/employees")
 @roles_required("ADMIN", "HR")
 def employee_master():
+    search = request.args.get("search", "").strip()
+    company = request.args.get("company", "").strip()
+    brand = request.args.get("brand", "").strip()
+    store = request.args.get("store", "").strip()
+    status = request.args.get("status", "").strip()
+
     connection = get_db_connection()
-    employees = connection.execute("""
-        SELECT * FROM employees
-        ORDER BY last_name, first_name, middle_name
-    """).fetchall()
+    query = "SELECT * FROM employees WHERE 1=1"
+    params = []
+
+    if search:
+        like_value = f"%{search}%"
+        query += """
+            AND (
+                LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(status, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(remarks, '')) LIKE LOWER(?)
+            )
+        """
+        params.extend([like_value] * 10)
+
+    if company:
+        query += " AND LOWER(company_name)=LOWER(?)"
+        params.append(company)
+    if brand:
+        query += " AND LOWER(brand)=LOWER(?)"
+        params.append(brand)
+    if store:
+        query += " AND LOWER(store_assignment)=LOWER(?)"
+        params.append(store)
+    if status in ("Active", "Inactive"):
+        query += " AND status=?"
+        params.append(status)
+
+    query += " ORDER BY last_name, first_name, middle_name"
+    employees = connection.execute(query, params).fetchall()
+
     brands = connection.execute("""
         SELECT brand_name FROM brands WHERE status='Active'
         ORDER BY brand_name
@@ -695,14 +734,15 @@ def employee_master():
         ORDER BY company_name
     """).fetchall()
     connection.close()
+
     return render_template(
         "employee_master.html",
         employees=employees,
         brands=brands,
         stores=stores,
-        companies=[row["company_name"] for row in company_rows]
+        companies=[row["company_name"] for row in company_rows],
+        filters={"search": search, "company": company, "brand": brand, "store": store, "status": status}
     )
-
 
 @app.route("/employees/save", methods=["POST"])
 @roles_required("ADMIN", "HR")
@@ -909,7 +949,11 @@ def import_employees():
             normalized["first_name"], normalized.get("middle_name", ""),
             normalized["position"], normalized["brand"],
             normalized["store_assignment"], normalized.get("date_hired") or None,
-            normalized.get("status") or "Active",
+            (
+                (normalized.get("status") or "Active").title()
+                if (normalized.get("status") or "Active").title() in ("Active", "Inactive")
+                else "Active"
+            ),
             normalized.get("remarks", "")
         ))
         added += 1
@@ -926,13 +970,56 @@ def import_employees():
 @app.route("/employees/export")
 @roles_required("ADMIN", "HR")
 def export_employees():
-    connection = get_db_connection()
-    rows = connection.execute("""
+    search = request.args.get("search", "").strip()
+    company = request.args.get("company", "").strip()
+    brand = request.args.get("brand", "").strip()
+    store = request.args.get("store", "").strip()
+    status = request.args.get("status", "").strip()
+
+    query = """
         SELECT company_name, last_name, first_name, middle_name,
                position, brand, store_assignment, date_hired,
                status, remarks
-        FROM employees ORDER BY last_name, first_name
-    """).fetchall()
+        FROM employees
+        WHERE 1=1
+    """
+    params = []
+
+    if search:
+        like_value = f"%{search}%"
+        query += """
+            AND (
+                LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(status, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(remarks, '')) LIKE LOWER(?)
+            )
+        """
+        params.extend([like_value] * 10)
+
+    if company:
+        query += " AND LOWER(company_name)=LOWER(?)"
+        params.append(company)
+    if brand:
+        query += " AND LOWER(brand)=LOWER(?)"
+        params.append(brand)
+    if store:
+        query += " AND LOWER(store_assignment)=LOWER(?)"
+        params.append(store)
+    if status in ("Active", "Inactive"):
+        query += " AND status=?"
+        params.append(status)
+
+    query += " ORDER BY last_name, first_name"
+
+    connection = get_db_connection()
+    rows = connection.execute(query, params).fetchall()
     connection.close()
 
     output = io.StringIO()
@@ -948,12 +1035,8 @@ def export_employees():
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv",
-        headers={
-            "Content-Disposition":
-            "attachment; filename=employee_master.csv"
-        }
+        headers={"Content-Disposition": "attachment; filename=employee_master_filtered.csv"}
     )
-
 
 @app.route("/companies")
 @roles_required("ADMIN", "HR")
