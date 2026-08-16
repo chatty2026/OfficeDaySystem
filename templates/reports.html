@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Weekly Report{% endblock %}
 {% block page_title %}Office Day Weekly Report{% endblock %}
+{% block head %}<style>@media print{@page{size:Letter landscape;margin:.4in}}</style>{% endblock %}
 {% block content %}
 <div class="card no-print">
     <h2>Generate Report</h2>
@@ -11,7 +12,7 @@
         </div>
         <div class="actions-inline">
             <button class="btn" type="submit">Generate Report</button>
-            {% if date_from and date_to %}<button class="btn btn-secondary" type="button" onclick="window.print()">Print Report</button>{% endif %}
+            {% if date_from and date_to %}<a class="btn btn-outline" href="{{ url_for('export_reports_excel', date_from=date_from, date_to=date_to) }}">Download Excel</a><button class="btn btn-secondary" type="button" onclick="window.print()">Print / Save PDF</button>{% endif %}
         </div>
     </form>
 </div>

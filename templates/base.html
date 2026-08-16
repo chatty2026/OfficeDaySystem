@@ -217,8 +217,10 @@
             <a class="nav-link" href="{{ url_for('brand_master') }}">Brand Master</a>
             <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>
         {% else %}
-            <a class="nav-link" href="{{ url_for('sales_dashboard') }}">Dashboard / Submit</a>
-            <a class="nav-link" href="{{ url_for('reports') }}">My Reports</a>
+            <a class="nav-link" href="{{ url_for('sales_dashboard') }}">Dashboard</a>
+            <a class="nav-link" href="{{ url_for('sales_office_day') }}">Office Day Request</a>
+            <a class="nav-link" href="{{ url_for('sales_employee_master') }}">Employee Masterfile</a>
+            <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>
         {% endif %}
 
         <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
