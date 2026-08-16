@@ -906,64 +906,102 @@ def import_employees():
         "remarks": "remarks"
     }
 
-    added = skipped = 0
+    added = updated = skipped = 0
     connection = get_db_connection()
-    for raw in reader:
-        normalized = {}
-        for key, value in raw.items():
-            mapped = aliases.get((key or "").strip().lower())
-            if mapped:
-                normalized[mapped] = (value or "").strip()
+    try:
+        for raw in reader:
+            normalized = {}
+            for key, value in raw.items():
+                mapped = aliases.get((key or "").strip().lower())
+                if mapped:
+                    normalized[mapped] = (value or "").strip()
 
-        required = [
-            "company_name", "last_name", "first_name",
-            "position", "brand", "store_assignment"
-        ]
-        if any(not normalized.get(field) for field in required):
-            skipped += 1
-            continue
+            required = [
+                "company_name", "last_name", "first_name",
+                "position", "brand", "store_assignment"
+            ]
+            if any(not normalized.get(field) for field in required):
+                skipped += 1
+                continue
 
-        duplicate = connection.execute("""
-            SELECT id FROM employees
-            WHERE LOWER(last_name)=LOWER(?)
-              AND LOWER(first_name)=LOWER(?)
-              AND LOWER(COALESCE(middle_name, ''))=LOWER(?)
-        """, (
-            normalized["last_name"],
-            normalized["first_name"],
-            normalized.get("middle_name", "")
-        )).fetchone()
-        if duplicate:
-            skipped += 1
-            continue
+            status_value = (normalized.get("status") or "Active").title()
+            if status_value not in ("Active", "Inactive"):
+                status_value = "Active"
 
-        connection.execute("""
-            INSERT INTO employees (
-                company_name, last_name, first_name, middle_name,
-                position, brand, store_assignment, date_hired,
-                status, remarks
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            normalized["company_name"], normalized["last_name"],
-            normalized["first_name"], normalized.get("middle_name", ""),
-            normalized["position"], normalized["brand"],
-            normalized["store_assignment"], normalized.get("date_hired") or None,
-            (
-                (normalized.get("status") or "Active").title()
-                if (normalized.get("status") or "Active").title() in ("Active", "Inactive")
-                else "Active"
-            ),
-            normalized.get("remarks", "")
-        ))
-        added += 1
+            existing = connection.execute("""
+                SELECT id
+                FROM employees
+                WHERE LOWER(last_name)=LOWER(?)
+                  AND LOWER(first_name)=LOWER(?)
+                ORDER BY id
+                LIMIT 1
+            """, (
+                normalized["last_name"],
+                normalized["first_name"]
+            )).fetchone()
 
-    connection.commit()
-    connection.close()
+            if existing:
+                connection.execute("""
+                    UPDATE employees
+                    SET company_name=?,
+                        last_name=?,
+                        first_name=?,
+                        middle_name=?,
+                        position=?,
+                        brand=?,
+                        store_assignment=?,
+                        date_hired=?,
+                        status=?,
+                        remarks=?
+                    WHERE id=?
+                """, (
+                    normalized["company_name"],
+                    normalized["last_name"],
+                    normalized["first_name"],
+                    normalized.get("middle_name", ""),
+                    normalized["position"],
+                    normalized["brand"],
+                    normalized["store_assignment"],
+                    normalized.get("date_hired") or None,
+                    status_value,
+                    normalized.get("remarks", ""),
+                    existing["id"]
+                ))
+                updated += 1
+            else:
+                connection.execute("""
+                    INSERT INTO employees (
+                        company_name, last_name, first_name, middle_name,
+                        position, brand, store_assignment, date_hired,
+                        status, remarks
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    normalized["company_name"],
+                    normalized["last_name"],
+                    normalized["first_name"],
+                    normalized.get("middle_name", ""),
+                    normalized["position"],
+                    normalized["brand"],
+                    normalized["store_assignment"],
+                    normalized.get("date_hired") or None,
+                    status_value,
+                    normalized.get("remarks", "")
+                ))
+                added += 1
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
     flash(
-        f"Employee import completed: {added} added, {skipped} skipped.",
+        f"Employee import completed: {added} added, {updated} updated, {skipped} skipped.",
         "success"
     )
+
     return redirect(url_for("employee_master"))
 
 
