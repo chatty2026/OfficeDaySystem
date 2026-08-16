@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Company Master{% endblock %}
+{% block page_title %}Company Master{% endblock %}
+
+{% block content %}
+<div class="grid-2">
+    <div class="card">
+        <h2>Add / Edit Company</h2>
+        <form method="POST" action="{{ url_for('save_company') }}" id="companyForm">
+            <input type="hidden" name="record_id" id="record_id">
+
+            <label>Company Name</label>
+            <input name="company_name" id="company_name" required>
+
+            <label>Status</label>
+            <select name="status" id="company_status">
+                <option>Active</option>
+                <option>Inactive</option>
+            </select>
+
+            <label>Remarks</label>
+            <textarea name="remarks" id="company_remarks"></textarea>
+
+            <div class="actions-inline">
+                <button class="btn" type="submit">Save Company</button>
+                <button class="btn btn-secondary" type="button" id="clearCompany">Clear</button>
+                <a class="btn btn-outline" href="{{ url_for('export_companies') }}">Export CSV</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Company List</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Company Name</th>
+                        <th>Status</th>
+                        <th>Remarks</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for item in companies %}
+                    <tr>
+                        <td>{{ item.company_name }}</td>
+                        <td><span class="badge">{{ item.status }}</span></td>
+                        <td>{{ item.remarks or "-" }}</td>
+                        <td>
+                            <div class="actions-inline">
+                                <button class="btn btn-outline edit-company"
+                                        type="button"
+                                        data-id="{{ item.id }}"
+                                        data-name="{{ item.company_name }}"
+                                        data-status="{{ item.status }}"
+                                        data-remarks="{{ item.remarks or '' }}">
+                                    Edit
+                                </button>
+
+                                <form method="POST"
+                                      action="{{ url_for('delete_company', company_id=item.id) }}"
+                                      onsubmit="return confirm('Delete company {{ item.company_name }}? This cannot be undone.');"
+                                      style="display:inline; margin:0;">
+                                    <button class="btn btn-danger" type="submit">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="4" class="muted">No company records.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll(".edit-company").forEach(button => {
+    button.addEventListener("click", () => {
+        document.getElementById("record_id").value = button.dataset.id;
+        document.getElementById("company_name").value = button.dataset.name;
+        document.getElementById("company_status").value = button.dataset.status;
+        document.getElementById("company_remarks").value = button.dataset.remarks;
+        window.scrollTo({top: 0, behavior: "smooth"});
+    });
+});
+
+document.getElementById("clearCompany").addEventListener("click", () => {
+    document.getElementById("companyForm").reset();
+    document.getElementById("record_id").value = "";
+});
+</script>
+{% endblock %}

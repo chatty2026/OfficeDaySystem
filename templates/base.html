@@ -203,6 +203,7 @@
         {% if session.role == 'ADMIN' %}
             <a class="nav-link" href="{{ url_for('admin_dashboard') }}">Dashboard</a>
             <a class="nav-link" href="{{ url_for('employee_master') }}">Employee Master</a>
+            <a class="nav-link" href="{{ url_for('company_master') }}">Company Master</a>
             <a class="nav-link" href="{{ url_for('store_master') }}">Store Master</a>
             <a class="nav-link" href="{{ url_for('brand_master') }}">Brand Master</a>
             <a class="nav-link" href="{{ url_for('user_management') }}">User Management</a>
@@ -211,6 +212,7 @@
         {% elif session.role == 'HR' %}
             <a class="nav-link" href="{{ url_for('hr_dashboard') }}">Dashboard / Requests</a>
             <a class="nav-link" href="{{ url_for('employee_master') }}">Employee Master</a>
+            <a class="nav-link" href="{{ url_for('company_master') }}">Company Master</a>
             <a class="nav-link" href="{{ url_for('store_master') }}">Store Master</a>
             <a class="nav-link" href="{{ url_for('brand_master') }}">Brand Master</a>
             <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>

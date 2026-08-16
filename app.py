@@ -160,6 +160,31 @@ def migrate_brands(connection):
     """)
 
 
+
+def migrate_companies(connection):
+    id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    connection.execute(f"""
+        CREATE TABLE IF NOT EXISTS companies (
+            id {id_type},
+            company_name TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'Active'
+                CHECK(status IN ('Active', 'Inactive')),
+            remarks TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    columns = table_columns(connection, "companies")
+    if "status" not in columns:
+        connection.execute(
+            "ALTER TABLE companies ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'"
+        )
+    if "remarks" not in columns:
+        connection.execute("ALTER TABLE companies ADD COLUMN remarks TEXT")
+    if "created_at" not in columns:
+        connection.execute("ALTER TABLE companies ADD COLUMN created_at TIMESTAMP")
+
+
 def migrate_employees(connection):
     id_type = "SERIAL PRIMARY KEY" if USING_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     connection.execute(f"""
@@ -228,8 +253,27 @@ def initialize_database():
         migrate_users(connection)
         migrate_stores(connection)
         migrate_brands(connection)
+        migrate_companies(connection)
         migrate_employees(connection)
         migrate_requests(connection)
+
+        default_companies = [
+            "CONCEPT CLOTHING CO., INC.",
+            "CORPORATE APPAREL, INC.",
+            "CEO GROUP OF COMPANIES"
+        ]
+        for company in default_companies:
+            if USING_POSTGRES:
+                connection.execute("""
+                    INSERT INTO companies (company_name, status)
+                    VALUES (?, 'Active')
+                    ON CONFLICT (company_name) DO NOTHING
+                """, (company,))
+            else:
+                connection.execute("""
+                    INSERT OR IGNORE INTO companies (company_name, status)
+                    VALUES (?, 'Active')
+                """, (company,))
 
         default_brands = [
             "WALL STREET", "SAHARA", "CRITERION", "ULTIMO",
@@ -664,13 +708,17 @@ def employee_master():
         SELECT store_name FROM stores WHERE status='Active'
         ORDER BY store_name
     """).fetchall()
+    company_rows = connection.execute("""
+        SELECT company_name FROM companies WHERE status='Active'
+        ORDER BY company_name
+    """).fetchall()
     connection.close()
     return render_template(
         "employee_master.html",
         employees=employees,
         brands=brands,
         stores=stores,
-        companies=COMPANIES
+        companies=[row["company_name"] for row in company_rows]
     )
 
 
@@ -922,6 +970,171 @@ def export_employees():
             "Content-Disposition":
             "attachment; filename=employee_master.csv"
         }
+    )
+
+
+@app.route("/companies")
+@roles_required("ADMIN", "HR")
+def company_master():
+    connection = get_db_connection()
+    companies = connection.execute(
+        "SELECT * FROM companies ORDER BY company_name"
+    ).fetchall()
+    connection.close()
+    return render_template("company_master.html", companies=companies)
+
+
+@app.route("/companies/save", methods=["POST"])
+@roles_required("ADMIN", "HR")
+def save_company():
+    record_id = request.form.get("record_id", "").strip()
+    name = request.form.get("company_name", "").strip()
+    status = request.form.get("status", "Active").strip()
+    remarks = request.form.get("remarks", "").strip()
+
+    if not name:
+        flash("Company name is required.", "error")
+        return redirect(url_for("company_master"))
+
+    if status not in ("Active", "Inactive"):
+        status = "Active"
+
+    connection = get_db_connection()
+    try:
+        duplicate = connection.execute(
+            """
+            SELECT id
+            FROM companies
+            WHERE LOWER(company_name)=LOWER(?)
+              AND id <> ?
+            """,
+            (name, int(record_id) if record_id else 0)
+        ).fetchone()
+
+        if duplicate:
+            flash("Company name already exists.", "error")
+            return redirect(url_for("company_master"))
+
+        if record_id:
+            current = connection.execute(
+                "SELECT id, company_name FROM companies WHERE id=?",
+                (record_id,)
+            ).fetchone()
+
+            if current is None:
+                flash("Company record not found.", "error")
+                return redirect(url_for("company_master"))
+
+            if current["company_name"].strip().upper() != name:
+                employee_count = connection.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM employees
+                    WHERE LOWER(company_name)=LOWER(?)
+                    """,
+                    (current["company_name"],)
+                ).fetchone()["total"]
+
+                request_count = connection.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM office_day_requests
+                    WHERE LOWER(COALESCE(company_name, ''))=LOWER(?)
+                    """,
+                    (current["company_name"],)
+                ).fetchone()["total"]
+
+                if employee_count or request_count:
+                    flash(
+                        "This company is already linked to employee or Office Day records. "
+                        "To preserve history, its name cannot be changed. You may update "
+                        "its Status or Remarks instead.",
+                        "error"
+                    )
+                    return redirect(url_for("company_master"))
+
+            connection.execute("""
+                UPDATE companies
+                SET company_name=?, status=?, remarks=?
+                WHERE id=?
+            """, (name, status, remarks, record_id))
+            message = "Company updated successfully."
+        else:
+            connection.execute("""
+                INSERT INTO companies (company_name, status, remarks)
+                VALUES (?, ?, ?)
+            """, (name, status, remarks))
+            message = "Company added successfully."
+
+        connection.commit()
+        flash(message, "success")
+    except (sqlite3.IntegrityError, PostgresIntegrityError):
+        connection.rollback()
+        flash("Company name already exists.", "error")
+    finally:
+        connection.close()
+
+    return redirect(url_for("company_master"))
+
+
+@app.route("/companies/<int:company_id>/delete", methods=["POST"])
+@roles_required("ADMIN", "HR")
+def delete_company(company_id):
+    connection = get_db_connection()
+    try:
+        company = connection.execute(
+            "SELECT id, company_name FROM companies WHERE id=?",
+            (company_id,)
+        ).fetchone()
+
+        if company is None:
+            flash("Company record not found.", "error")
+            return redirect(url_for("company_master"))
+
+        employee_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM employees
+            WHERE LOWER(company_name)=LOWER(?)
+            """,
+            (company["company_name"],)
+        ).fetchone()["total"]
+
+        request_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM office_day_requests
+            WHERE LOWER(COALESCE(company_name, ''))=LOWER(?)
+            """,
+            (company["company_name"],)
+        ).fetchone()["total"]
+
+        if employee_count or request_count:
+            flash(
+                "This company is linked to employee or Office Day records and "
+                "cannot be permanently deleted. Set it to Inactive instead.",
+                "error"
+            )
+            return redirect(url_for("company_master"))
+
+        connection.execute("DELETE FROM companies WHERE id=?", (company_id,))
+        connection.commit()
+        flash(
+            f'Company "{company["company_name"]}" deleted successfully.',
+            "success"
+        )
+    finally:
+        connection.close()
+
+    return redirect(url_for("company_master"))
+
+
+@app.route("/companies/export")
+@roles_required("ADMIN", "HR")
+def export_companies():
+    return export_simple_master(
+        "companies", ["company_name", "status", "remarks"],
+        ["Company Name", "Status", "Remarks"], "company_master.csv"
     )
 
 
@@ -1204,7 +1417,7 @@ def export_brands():
 
 def export_simple_master(table, columns, headers, filename):
     connection = get_db_connection()
-    allowed = {"stores", "brands"}
+    allowed = {"stores", "brands", "companies"}
     if table not in allowed:
         connection.close()
         raise ValueError("Invalid table")
