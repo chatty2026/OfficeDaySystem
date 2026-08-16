@@ -257,24 +257,6 @@ def initialize_database():
         migrate_employees(connection)
         migrate_requests(connection)
 
-        default_companies = [
-            "CONCEPT CLOTHING CO., INC.",
-            "CORPORATE APPAREL, INC.",
-            "CEO GROUP OF COMPANIES"
-        ]
-        for company in default_companies:
-            if USING_POSTGRES:
-                connection.execute("""
-                    INSERT INTO companies (company_name, status)
-                    VALUES (?, 'Active')
-                    ON CONFLICT (company_name) DO NOTHING
-                """, (company,))
-            else:
-                connection.execute("""
-                    INSERT OR IGNORE INTO companies (company_name, status)
-                    VALUES (?, 'Active')
-                """, (company,))
-
         default_brands = [
             "WALL STREET", "SAHARA", "CRITERION", "ULTIMO",
             "ARROW", "VAN HEUSEN", "IZOD"
