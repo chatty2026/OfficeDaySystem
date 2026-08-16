@@ -2,14 +2,98 @@
 {% block title %}Sales Dashboard{% endblock %}
 {% block page_title %}Sales Dashboard{% endblock %}
 {% block content %}
+<div class="card">
+    <div class="section-head">
+        <div>
+            <h2>My Employee Master</h2>
+            {% if assigned_brands %}
+            <p class="muted" style="margin-bottom:0;">
+                Brand Access: <strong>{{ assigned_brands|join(", ") }}</strong>
+            </p>
+            {% endif %}
+        </div>
+        {% if assigned_brands %}
+        <div class="actions-inline">
+            <a class="btn btn-outline"
+               href="{{ url_for('sales_export_employees', search=filters.search, brand=filters.brand, store=filters.store) }}">
+                Download Employee List
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if assigned_brands %}
+    <form method="GET" action="{{ url_for('sales_dashboard') }}">
+        <div class="grid-3">
+            <div>
+                <label>Search Any Word</label>
+                <input name="search" value="{{ filters.search }}"
+                       placeholder="Name, company, position, brand, store...">
+            </div>
+            <div>
+                <label>Brand</label>
+                <select name="brand">
+                    <option value="">All Assigned Brands</option>
+                    {% for brand in assigned_brands %}
+                    <option value="{{ brand }}" {% if filters.brand == brand %}selected{% endif %}>{{ brand }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Store</label>
+                <select name="store">
+                    <option value="">All Stores</option>
+                    {% for store in available_stores %}
+                    <option value="{{ store }}" {% if filters.store == store %}selected{% endif %}>{{ store }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="actions-inline">
+            <button class="btn" type="submit">Apply Filters</button>
+            <a class="btn btn-secondary" href="{{ url_for('sales_dashboard') }}">Clear Filters</a>
+        </div>
+    </form>
+
+    <p class="muted">{{ employees|length }} active employee(s) shown</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Company</th>
+                    <th>Position</th>
+                    <th>Brand</th>
+                    <th>Store</th>
+                    <th>Date Hired</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for employee in employees %}
+                <tr>
+                    <td>{{ employee_display_name(employee) }}</td>
+                    <td>{{ employee.company_name }}</td>
+                    <td>{{ employee.position }}</td>
+                    <td>{{ employee.brand }}</td>
+                    <td>{{ employee.store_assignment }}</td>
+                    <td>{{ employee.date_hired or "-" }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="muted">No matching active employees.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted">No brand access assigned. Please contact the Administrator.</p>
+    {% endif %}
+</div>
+
 <div class="grid-2">
+
     <div class="card">
         <h2>Submit Office Day Request</h2>
-        {% if assigned_brands %}
-        <p class="muted"><strong>Brand Access:</strong> {{ assigned_brands|join(", ") }}</p>
-        {% else %}
-        <p class="muted"><strong>No brand access assigned.</strong> Please contact the Administrator.</p>
-        {% endif %}
         <form method="POST" action="{{ url_for('submit_request') }}">
             <label for="employee_id">Employee / Sales Personnel</label>
             <select id="employee_id" name="employee_id" required>

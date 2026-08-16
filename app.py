@@ -492,19 +492,63 @@ def hr_dashboard():
 @app.route("/sales")
 @roles_required("SALES")
 def sales_dashboard():
+    search = request.args.get("search", "").strip()
+    brand_filter = request.args.get("brand", "").strip()
+    store_filter = request.args.get("store", "").strip()
+
     connection = get_db_connection()
     assigned_brands = get_user_brands(connection, session["user_id"])
 
+    employees = []
+    available_stores = []
+
     if assigned_brands:
         placeholders = ", ".join(["?"] * len(assigned_brands))
-        employees = connection.execute(f"""
+        query = f"""
             SELECT * FROM employees
             WHERE status='Active'
               AND LOWER(brand) IN ({placeholders})
-            ORDER BY last_name, first_name, middle_name
+        """
+        params = [brand.lower() for brand in assigned_brands]
+
+        if search:
+            like_value = f"%{search}%"
+            query += """
+                AND (
+                    LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(remarks, '')) LIKE LOWER(?)
+                )
+            """
+            params.extend([like_value] * 9)
+
+        if brand_filter and brand_filter.lower() in {
+            brand.lower() for brand in assigned_brands
+        }:
+            query += " AND LOWER(brand)=LOWER(?)"
+            params.append(brand_filter)
+
+        if store_filter:
+            query += " AND LOWER(store_assignment)=LOWER(?)"
+            params.append(store_filter)
+
+        query += " ORDER BY last_name, first_name, middle_name"
+        employees = connection.execute(query, params).fetchall()
+
+        store_rows = connection.execute(f"""
+            SELECT DISTINCT store_assignment
+            FROM employees
+            WHERE status='Active'
+              AND LOWER(brand) IN ({placeholders})
+            ORDER BY store_assignment
         """, [brand.lower() for brand in assigned_brands]).fetchall()
-    else:
-        employees = []
+        available_stores = [row["store_assignment"] for row in store_rows]
 
     office_requests = connection.execute("""
         SELECT * FROM office_day_requests
@@ -522,14 +566,133 @@ def sales_dashboard():
         }
         for row in employees
     }
+
     return render_template(
         "sales_dashboard.html",
         employees=employees,
         office_requests=office_requests,
         employee_data=employee_data,
         purposes=PURPOSES,
-        assigned_brands=assigned_brands
+        assigned_brands=assigned_brands,
+        available_stores=available_stores,
+        filters={
+            "search": search,
+            "brand": brand_filter,
+            "store": store_filter
+        }
     )
+
+
+@app.route("/sales/employees/export")
+@roles_required("SALES")
+def sales_export_employees():
+    search = request.args.get("search", "").strip()
+    brand_filter = request.args.get("brand", "").strip()
+    store_filter = request.args.get("store", "").strip()
+
+    connection = get_db_connection()
+    assigned_brands = get_user_brands(connection, session["user_id"])
+
+    if not assigned_brands:
+        connection.close()
+        flash("No brand access is assigned to your account.", "error")
+        return redirect(url_for("sales_dashboard"))
+
+    placeholders = ", ".join(["?"] * len(assigned_brands))
+    query = f"""
+        SELECT company_name, store_assignment, last_name, first_name,
+               middle_name, position, brand, date_hired, status
+        FROM employees
+        WHERE status='Active'
+          AND LOWER(brand) IN ({placeholders})
+    """
+    params = [brand.lower() for brand in assigned_brands]
+
+    if search:
+        like_value = f"%{search}%"
+        query += """
+            AND (
+                LOWER(COALESCE(company_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(last_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(first_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(middle_name, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(position, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(brand, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(store_assignment, '')) LIKE LOWER(?)
+                OR LOWER(COALESCE(date_hired, '')) LIKE LOWER(?)
+            )
+        """
+        params.extend([like_value] * 8)
+
+    if brand_filter and brand_filter.lower() in {
+        brand.lower() for brand in assigned_brands
+    }:
+        query += " AND LOWER(brand)=LOWER(?)"
+        params.append(brand_filter)
+
+    if store_filter:
+        query += " AND LOWER(store_assignment)=LOWER(?)"
+        params.append(store_filter)
+
+    query += " ORDER BY brand, store_assignment, last_name, first_name"
+
+    rows = connection.execute(query, params).fetchall()
+    connection.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Employee List"
+
+    headers = [
+        "No.", "Company Name", "Store Assignment", "Last Name",
+        "First Name", "Middle Name", "Position", "Brand",
+        "Date Hired", "Status"
+    ]
+    ws.append(headers)
+
+    thin = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = border
+
+    for number, row in enumerate(rows, start=1):
+        ws.append([
+            number, row["company_name"], row["store_assignment"],
+            row["last_name"], row["first_name"], row["middle_name"] or "",
+            row["position"], row["brand"], row["date_hired"] or "",
+            row["status"]
+        ])
+
+    for excel_row in ws.iter_rows(min_row=2):
+        for cell in excel_row:
+            cell.border = border
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    for column_cells in ws.columns:
+        max_length = max(
+            len("" if cell.value is None else str(cell.value))
+            for cell in column_cells
+        )
+        ws.column_dimensions[get_column_letter(column_cells[0].column)].width = max_length + 3
+
+    ws.freeze_panes = "A2"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition":
+            "attachment; filename=my_brand_employee_list.xlsx"
+        }
+    )
+
 
 @app.route("/sales/submit-request", methods=["POST"])
 @roles_required("SALES")
