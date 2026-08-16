@@ -1554,40 +1554,26 @@ def delete_store(store_id):
             flash("Store record not found.", "error")
             return redirect(url_for("store_master"))
 
-        employee_count = connection.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM employees
-            WHERE LOWER(store_assignment)=LOWER(?)
-            """,
-            (store["store_name"],)
-        ).fetchone()["total"]
-
-        request_count = connection.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM office_day_requests
-            WHERE LOWER(store_assignment)=LOWER(?)
-            """,
-            (store["store_name"],)
-        ).fetchone()["total"]
-
-        if employee_count or request_count:
-            flash(
-                "This store is linked to employee or Office Day records and "
-                "cannot be permanently deleted. Set it to Inactive instead.",
-                "error"
-            )
-            return redirect(url_for("store_master"))
-
-        connection.execute("DELETE FROM stores WHERE id = ?", (store_id,))
+        connection.execute(
+            "DELETE FROM stores WHERE id = ?",
+            (store_id,)
+        )
         connection.commit()
-        flash(f'Store "{store["store_name"]}" deleted successfully.', "success")
+
+        flash(
+            f'Store "{store["store_name"]}" deleted successfully. '
+            "Existing employee and Office Day history was retained.",
+            "success"
+        )
+
+    except Exception as e:
+        connection.rollback()
+        flash(f"Unable to delete store: {e}", "error")
+
     finally:
         connection.close()
 
     return redirect(url_for("store_master"))
-
 
 @app.route("/stores/import", methods=["POST"])
 @roles_required("ADMIN", "HR")
