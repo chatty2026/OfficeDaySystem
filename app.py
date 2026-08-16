@@ -929,54 +929,115 @@ def delete_employee(employee_id):
 @roles_required("ADMIN", "HR")
 def import_employees():
     uploaded_file = request.files.get("employee_csv")
-    if not uploaded_file or not uploaded_file.filename.lower().endswith(".csv"):
-        flash("Please choose a valid employee CSV file.", "error")
+
+    if not uploaded_file:
+        flash("Please choose a valid employee file.", "error")
+        return redirect(url_for("employee_master"))
+
+    filename = uploaded_file.filename.lower()
+
+    if not filename.endswith((".csv", ".xlsx")):
+        flash("Please upload a CSV or Excel (.xlsx) file.", "error")
         return redirect(url_for("employee_master"))
 
     try:
-        stream = io.StringIO(
-            uploaded_file.stream.read().decode("utf-8-sig"),
-            newline=""
-        )
-        reader = csv.DictReader(stream)
+        if filename.endswith(".csv"):
+            stream = io.StringIO(
+                uploaded_file.stream.read().decode("utf-8-sig"),
+                newline=""
+            )
+            reader = list(csv.DictReader(stream))
+
+        else:
+            workbook = load_workbook(uploaded_file, data_only=True)
+            worksheet = workbook.active
+
+            rows = list(worksheet.iter_rows(values_only=True))
+
+            if not rows:
+                flash("The Excel file is empty.", "error")
+                return redirect(url_for("employee_master"))
+
+            headers = [
+                str(value).strip() if value is not None else ""
+                for value in rows[0]
+            ]
+
+            reader = []
+
+            for values in rows[1:]:
+                raw = {}
+
+                for header, value in zip(headers, values):
+                    raw[header] = "" if value is None else str(value).strip()
+
+                reader.append(raw)
+
     except UnicodeDecodeError:
         flash("Please save the CSV using UTF-8 format.", "error")
         return redirect(url_for("employee_master"))
 
+    except Exception as e:
+        flash(f"Unable to read the uploaded file: {e}", "error")
+        return redirect(url_for("employee_master"))
+
     aliases = {
+        "no.": "ignore",
+        "no": "ignore",
+        "#": "ignore",
+
         "company": "company_name",
         "company name": "company_name",
+
+        "store": "store_assignment",
+        "store assignment": "store_assignment",
+
         "last name": "last_name",
         "first name": "first_name",
         "middle name": "middle_name",
+
         "position": "position",
         "brand": "brand",
-        "store": "store_assignment",
-        "store assignment": "store_assignment",
         "date hired": "date_hired",
         "status": "status",
         "remarks": "remarks"
     }
 
-    added = updated = skipped = 0
+    added = 0
+    updated = 0
+    skipped = 0
+
     connection = get_db_connection()
+
     try:
         for raw in reader:
             normalized = {}
+
             for key, value in raw.items():
                 mapped = aliases.get((key or "").strip().lower())
-                if mapped:
-                    normalized[mapped] = (value or "").strip()
+
+                if mapped and mapped != "ignore":
+                    normalized[mapped] = (
+                        "" if value is None else str(value).strip()
+                    )
 
             required = [
-                "company_name", "last_name", "first_name",
-                "position", "brand", "store_assignment"
+                "company_name",
+                "last_name",
+                "first_name",
+                "position",
+                "brand",
+                "store_assignment"
             ]
+
             if any(not normalized.get(field) for field in required):
                 skipped += 1
                 continue
 
-            status_value = (normalized.get("status") or "Active").title()
+            status_value = (
+                normalized.get("status") or "Active"
+            ).title()
+
             if status_value not in ("Active", "Inactive"):
                 status_value = "Active"
 
@@ -1019,13 +1080,22 @@ def import_employees():
                     normalized.get("remarks", ""),
                     existing["id"]
                 ))
+
                 updated += 1
+
             else:
                 connection.execute("""
                     INSERT INTO employees (
-                        company_name, last_name, first_name, middle_name,
-                        position, brand, store_assignment, date_hired,
-                        status, remarks
+                        company_name,
+                        last_name,
+                        first_name,
+                        middle_name,
+                        position,
+                        brand,
+                        store_assignment,
+                        date_hired,
+                        status,
+                        remarks
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
@@ -1040,17 +1110,21 @@ def import_employees():
                     status_value,
                     normalized.get("remarks", "")
                 ))
+
                 added += 1
 
         connection.commit()
+
     except Exception:
         connection.rollback()
         raise
+
     finally:
         connection.close()
 
     flash(
-        f"Employee import completed: {added} added, {updated} updated, {skipped} skipped.",
+        f"Employee import completed: "
+        f"{added} added, {updated} updated, {skipped} skipped.",
         "success"
     )
 
