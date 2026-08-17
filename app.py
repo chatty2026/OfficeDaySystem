@@ -513,11 +513,28 @@ def hr_dashboard():
     office_requests = format_rows_for_display(
         office_requests, ("requested_date", "approved_date", "created_at")
     )
+    employees = connection.execute("""
+        SELECT * FROM employees
+        WHERE status='Active'
+        ORDER BY last_name, first_name, middle_name
+    """).fetchall()
+    employee_data = {
+        str(row["id"]): {
+            "company_name": row["company_name"],
+            "position": row["position"],
+            "brand": row["brand"],
+            "store_assignment": row["store_assignment"]
+        }
+        for row in employees
+    }
     connection.close()
     return render_template(
         "hr_dashboard.html",
         counts=counts,
-        office_requests=office_requests
+        office_requests=office_requests,
+        employees=employees,
+        employee_data=employee_data,
+        purposes=PURPOSES
     )
 
 
@@ -677,6 +694,56 @@ def submit_request():
 
     flash("Office Day request submitted successfully.", "success")
     return redirect(url_for("sales_office_day"))
+
+
+@app.route("/hr/submit-request", methods=["POST"])
+@roles_required("ADMIN", "HR")
+def hr_submit_request():
+    employee_id = request.form.get("employee_id", "").strip()
+    requested_date = request.form.get("requested_date", "").strip()
+    purpose = request.form.get("purpose", "").strip()
+    other_purpose = request.form.get("other_purpose", "").strip()
+    remarks = request.form.get("remarks", "").strip()
+
+    if not employee_id or not requested_date or purpose not in PURPOSES:
+        flash("Please complete all required fields.", "error")
+        return redirect(url_for("hr_dashboard"))
+
+    if purpose == "Other" and not other_purpose:
+        flash("Please specify the other purpose.", "error")
+        return redirect(url_for("hr_dashboard"))
+
+    connection = get_db_connection()
+    employee = connection.execute(
+        "SELECT * FROM employees WHERE id=? AND status='Active'",
+        (employee_id,)
+    ).fetchone()
+
+    if employee is None:
+        connection.close()
+        flash("Selected employee is unavailable or inactive.", "error")
+        return redirect(url_for("hr_dashboard"))
+
+    display_name = employee_display_name(employee)
+    connection.execute("""
+        INSERT INTO office_day_requests (
+            employee_id, employee_name, company_name, position,
+            store_assignment, brand, requested_date, purpose,
+            other_purpose, remarks, requested_by, requested_by_name,
+            status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending HR Approval')
+    """, (
+        employee["id"], display_name, employee["company_name"],
+        employee["position"], employee["store_assignment"],
+        employee["brand"], requested_date, purpose, other_purpose,
+        remarks, session["user_id"], session["full_name"]
+    ))
+    connection.commit()
+    connection.close()
+
+    flash("Office Day request submitted successfully and is pending HR approval.", "success")
+    return redirect(url_for("hr_dashboard"))
 
 
 @app.route("/hr/request/<int:request_id>/approve", methods=["POST"])
