@@ -481,7 +481,15 @@ def admin_dashboard():
     connection = get_db_connection()
     counts = fetch_dashboard_counts(connection)
     recent_requests = connection.execute("""
-        SELECT * FROM office_day_requests ORDER BY created_at DESC LIMIT 8
+        SELECT * FROM office_day_requests
+        ORDER BY
+            CASE status
+                WHEN 'Pending HR Approval' THEN 1
+                WHEN 'Adjusted Schedule' THEN 2
+                WHEN 'Approved' THEN 3
+                ELSE 4
+            END,
+            created_at DESC
     """).fetchall()
     recent_requests = format_rows_for_display(
         recent_requests, ("requested_date", "approved_date", "created_at")
@@ -855,7 +863,13 @@ def delete_request(request_id):
             flash("Office Day request not found.", "error")
             return redirect(url_for(destination))
 
-        if session.get("role") == "SALES":
+        role = session.get("role")
+
+        if role == "HR":
+            flash("HR accounts are not allowed to delete Office Day records.", "error")
+            return redirect(url_for(destination))
+
+        if role == "SALES":
             if office_request["requested_by"] != session.get("user_id"):
                 flash("You can delete only your own Office Day requests.", "error")
                 return redirect(url_for("sales_office_day"))
@@ -865,6 +879,10 @@ def delete_request(request_id):
                     "error"
                 )
                 return redirect(url_for("sales_office_day"))
+
+        elif role != "ADMIN":
+            flash("You are not authorized to delete Office Day records.", "error")
+            return redirect(url_for(destination))
 
         connection.execute(
             "DELETE FROM office_day_requests WHERE id = ?",
@@ -2046,22 +2064,35 @@ def reports():
     date_to = request.args.get("date_to", "").strip()
     rows = []
 
-    if date_from and date_to:
-        connection = get_db_connection()
+    connection = get_db_connection()
+
+    if session["role"] in ("ADMIN", "HR"):
+        query = "SELECT * FROM office_day_requests WHERE 1=1"
+        params = []
+
+        if date_from and date_to:
+            query += " AND requested_date BETWEEN ? AND ?"
+            params.extend([date_from, date_to])
+
+        query += " ORDER BY created_at DESC, employee_name"
+        rows = connection.execute(query, params).fetchall()
+
+    elif date_from and date_to:
         query = """
             SELECT * FROM office_day_requests
             WHERE requested_date BETWEEN ? AND ?
+              AND requested_by = ?
+            ORDER BY requested_date, employee_name
         """
-        params = [date_from, date_to]
+        rows = connection.execute(
+            query,
+            (date_from, date_to, session["user_id"])
+        ).fetchall()
 
-        if session["role"] == "SALES":
-            query += " AND requested_by = ?"
-            params.append(session["user_id"])
-
-        query += " ORDER BY requested_date, employee_name"
-        rows = connection.execute(query, params).fetchall()
-        rows = format_rows_for_display(rows, ("requested_date", "approved_date", "created_at"))
-        connection.close()
+    rows = format_rows_for_display(
+        rows, ("requested_date", "approved_date", "created_at")
+    )
+    connection.close()
 
     return render_template(
         "reports.html",
@@ -2074,24 +2105,109 @@ def reports():
 @app.route("/reports/export.xlsx")
 @login_required
 def export_reports_excel():
-    date_from=request.args.get("date_from","").strip(); date_to=request.args.get("date_to","").strip()
-    if not date_from or not date_to:
-        flash("Select a date range first.","error"); return redirect(url_for("reports"))
-    connection=get_db_connection(); query="SELECT * FROM office_day_requests WHERE requested_date BETWEEN ? AND ?"; params=[date_from,date_to]
-    if session["role"]=="SALES": query += " AND requested_by=?"; params.append(session["user_id"])
-    query += " ORDER BY requested_date, employee_name"; rows=connection.execute(query,params).fetchall(); connection.close()
-    wb=Workbook(); ws=wb.active; ws.title="Office Day Report"
-    headers=["Date","Employee","Company","Position","Brand","Store","Purpose","Status","Approved Date"]; ws.append(headers)
-    thin=Side(style="thin"); border=Border(left=thin,right=thin,top=thin,bottom=thin)
-    for c in ws[1]: c.font=Font(bold=True); c.alignment=Alignment(horizontal="center"); c.border=border
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+
+    connection = get_db_connection()
+
+    if session["role"] in ("ADMIN", "HR"):
+        query = "SELECT * FROM office_day_requests WHERE 1=1"
+        params = []
+        if date_from and date_to:
+            query += " AND requested_date BETWEEN ? AND ?"
+            params.extend([date_from, date_to])
+    else:
+        if not date_from or not date_to:
+            connection.close()
+            flash("Select a date range first.", "error")
+            return redirect(url_for("reports"))
+        query = """
+            SELECT * FROM office_day_requests
+            WHERE requested_date BETWEEN ? AND ?
+              AND requested_by = ?
+        """
+        params = [date_from, date_to, session["user_id"]]
+
+    query += " ORDER BY created_at DESC, employee_name"
+    rows = connection.execute(query, params).fetchall()
+    connection.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Office Day Report"
+
+    headers = [
+        "Date Filed","Employee","Company","Position","Brand","Store",
+        "Requested Office Day","Purpose","Status",
+        "Approved / Adjusted Office Day","Requested By","HR Action By"
+    ]
+    ws.append(headers)
+
+    thin = Side(style="thin")
+    border = Border(left=thin,right=thin,top=thin,bottom=thin)
+
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+        c.border = border
+
     for r in rows:
-        purpose=r["purpose"] + ((": "+r["other_purpose"]) if r["other_purpose"] else "")
-        ws.append([format_date_only(r["requested_date"]),r["employee_name"],r["company_name"] or "-",r["position"] or "-",r["brand"],r["store_assignment"],purpose,r["status"],format_date_only(r["approved_date"]) if r["approved_date"] else "-"])
+        purpose = r["purpose"] + (
+            (": " + r["other_purpose"]) if r["other_purpose"] else ""
+        )
+        ws.append([
+            format_date_only(r["created_at"]),
+            r["employee_name"],
+            r["company_name"] or "-",
+            r["position"] or "-",
+            r["brand"],
+            r["store_assignment"],
+            format_date_only(r["requested_date"]),
+            purpose,
+            r["status"],
+            format_date_only(r["approved_date"]) if r["approved_date"] else "-",
+            r["requested_by_name"] or "-",
+            r["hr_action_by"] or "-"
+        ])
+
     for row in ws.iter_rows(min_row=2):
-        for c in row: c.border=border
-    for col in ws.columns: ws.column_dimensions[get_column_letter(col[0].column)].width=min(max(len(str(c.value or "")) for c in col)+3,45)
-    ws.freeze_panes="A2"; output=io.BytesIO(); wb.save(output); output.seek(0)
-    return Response(output.getvalue(),mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f"attachment; filename=office_day_report_{date_from}_to_{date_to}.xlsx"})
+        for c in row:
+            c.border = border
+            c.alignment = Alignment(vertical="top", wrap_text=True)
+
+    for col in ws.columns:
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(
+            max(len(str(c.value or "")) for c in col) + 3, 35
+        )
+
+    ws.freeze_panes = "A2"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_title_rows = "1:1"
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.4
+    ws.page_margins.bottom = 0.4
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    if date_from and date_to:
+        filename = f"office_day_report_{date_from}_to_{date_to}.xlsx"
+    else:
+        filename = "office_day_report_all_records.xlsx"
+
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 initialize_database()

@@ -1,31 +1,5 @@
 {% extends "base.html" %}
 {% block title %}HR Dashboard{% endblock %}
-{% block scripts %}
-<script>
-const hrEmployeeData = {{ employee_data|tojson }};
-const hrEmployeeSelect = document.getElementById("hr_employee_id");
-function updateHrEmployeeDetails() {
-    const data = hrEmployeeData[hrEmployeeSelect.value] || {};
-    document.getElementById("hr_company_name").value = data.company_name || "";
-    document.getElementById("hr_position").value = data.position || "";
-    document.getElementById("hr_brand").value = data.brand || "";
-    document.getElementById("hr_store_assignment").value = data.store_assignment || "";
-}
-hrEmployeeSelect.addEventListener("change", updateHrEmployeeDetails);
-
-const hrPurpose = document.getElementById("hr_purpose");
-const hrOtherWrap = document.getElementById("hr_other_purpose_wrap");
-const hrOther = document.getElementById("hr_other_purpose");
-function updateHrPurpose() {
-    const isOther = hrPurpose.value === "Other";
-    hrOtherWrap.style.display = isOther ? "block" : "none";
-    hrOther.required = isOther;
-    if (!isOther) hrOther.value = "";
-}
-hrPurpose.addEventListener("change", updateHrPurpose);
-updateHrPurpose();
-</script>
-{% endblock %}
 {% block page_title %}HR Dashboard / Office Day Requests{% endblock %}
 {% block content %}
 <div class="metric-grid">
@@ -33,44 +7,6 @@ updateHrPurpose();
     <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending HR Approval</div></div>
     <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
     <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active System Users</div></div>
-</div>
-
-
-<div class="card">
-    <div class="section-head"><h2>Request Office Day Schedule</h2></div>
-    <p class="muted">Admin and HR may submit an Office Day request for any active employee. All new requests will remain Pending HR Approval.</p>
-    <form method="POST" action="{{ url_for('hr_submit_request') }}">
-        <div class="grid-3">
-            <div>
-                <label>Employee</label>
-                <select name="employee_id" id="hr_employee_id" required>
-                    <option value="">Select employee</option>
-                    {% for employee in employees %}
-                    <option value="{{ employee.id }}">{{ employee_display_name(employee) }} — {{ employee.brand }} — {{ employee.store_assignment }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div><label>Company</label><input id="hr_company_name" readonly></div>
-            <div><label>Position</label><input id="hr_position" readonly></div>
-            <div><label>Brand</label><input id="hr_brand" readonly></div>
-            <div><label>Store Assignment</label><input id="hr_store_assignment" readonly></div>
-            <div><label>Requested Date</label><input type="date" name="requested_date" required></div>
-            <div>
-                <label>Purpose</label>
-                <select name="purpose" id="hr_purpose" required>
-                    <option value="">Select purpose</option>
-                    {% for purpose in purposes %}<option value="{{ purpose }}">{{ purpose }}</option>{% endfor %}
-                </select>
-            </div>
-            <div id="hr_other_purpose_wrap" style="display:none;">
-                <label>Other Purpose</label>
-                <input name="other_purpose" id="hr_other_purpose">
-            </div>
-        </div>
-        <label>Remarks</label>
-        <textarea name="remarks"></textarea>
-        <div class="actions-inline"><button class="btn" type="submit">Submit Office Day Request</button></div>
-    </form>
 </div>
 
 <div class="card">
@@ -113,6 +49,7 @@ updateHrPurpose();
             </form>
         </div>
         {% endif %}
+        {% if session.role == "ADMIN" %}
         <div class="actions-inline" style="margin-top:14px;">
             <form method="POST"
                   action="{{ url_for('delete_request', request_id=item.id) }}"
@@ -122,6 +59,7 @@ updateHrPurpose();
                 <button class="btn btn-danger" type="submit">Delete Request</button>
             </form>
         </div>
+        {% endif %}
     </div>
     {% else %}
         <p class="muted">No Office Day requests have been submitted.</p>
