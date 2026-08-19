@@ -7,78 +7,103 @@
     @page{size:A4 landscape;margin:8mm;}
     body{background:#fff;}
     .sidebar,.topbar,.no-print{display:none!important;}
-    .main-content{margin:0!important;padding:0!important;}
+    .main-area{margin:0!important;width:100%!important;}
+    .content{padding:0!important;max-width:none!important;}
     .card{box-shadow:none!important;border:none!important;padding:0!important;}
     .table-wrap{overflow:visible!important;}
     table{width:100%!important;font-size:7.5px!important;table-layout:auto;}
     th,td{padding:4px 5px!important;white-space:normal!important;word-break:break-word;}
-    .report-header{margin-bottom:10px;}
 }
 </style>
 {% endblock %}
+
 {% block content %}
 <div class="card no-print">
     <h2>Generate Report</h2>
     <form method="GET" action="{{ url_for('reports') }}">
         <div class="grid-2">
-            <div><label>Date From</label><input type="date" name="date_from" value="{{ date_from }}" {% if session.role == "SALES" %}required{% endif %}></div>
-            <div><label>Date To</label><input type="date" name="date_to" value="{{ date_to }}" {% if session.role == "SALES" %}required{% endif %}></div>
+            <div>
+                <label>Date From</label>
+                <input type="date" name="date_from" value="{{ date_from }}" required>
+            </div>
+            <div>
+                <label>Date To</label>
+                <input type="date" name="date_to" value="{{ date_to }}" required>
+            </div>
         </div>
         <div class="actions-inline">
-            <button class="btn" type="submit">Apply Date Filter</button>
-            {% if session.role in ('ADMIN', 'HR') %}
-                <a class="btn btn-secondary" href="{{ url_for('reports') }}">Show All Requests</a>
-                <a class="btn btn-outline" href="{{ url_for('export_reports_excel', date_from=date_from, date_to=date_to) }}">Download Excel</a>
-                <button class="btn btn-secondary" type="button" onclick="window.print()">Print / Save PDF</button>
-            {% elif date_from and date_to %}
-                <a class="btn btn-outline" href="{{ url_for('export_reports_excel', date_from=date_from, date_to=date_to) }}">Download Excel</a>
-                <button class="btn btn-secondary" type="button" onclick="window.print()">Print / Save PDF</button>
+            <button class="btn" type="submit">Generate Report</button>
+            {% if date_from and date_to %}
+            <a class="btn btn-outline" href="{{ url_for('export_reports_excel', date_from=date_from, date_to=date_to) }}">Download Excel</a>
+            <button class="btn btn-secondary" type="button" onclick="window.print()">Print / Save PDF</button>
             {% endif %}
         </div>
     </form>
 </div>
 
-{% if session.role in ('ADMIN', 'HR') or (date_from and date_to) %}
+{% if date_from and date_to %}
 <div class="card">
     <div style="text-align:center;margin-bottom:22px;">
         <h2 style="margin-bottom:5px;">CEO GROUP OF COMPANIES</h2>
         <h3 style="margin:0;">OFFICE DAY SCHEDULE REPORT</h3>
-        {% if date_from and date_to %}
         <p>Period Covered: <strong>{{ format_date_only(date_from) }}</strong> to <strong>{{ format_date_only(date_to) }}</strong></p>
-        {% else %}
-        <p>Period Covered: <strong>All Office Day Requests</strong></p>
-        {% endif %}
         <p class="muted">Printed By: {{ session.full_name }}</p>
     </div>
+
     <div class="table-wrap">
     <table>
-        <thead><tr><th>Date Filed</th><th>Employee</th><th>Company</th><th>Position</th><th>Brand</th><th>Store</th><th>Requested Office Day</th><th>Purpose</th><th>Status</th><th>Approved / Adjusted Office Day</th><th>Requested By</th><th>HR Action By</th>{% if session.role == 'ADMIN' %}<th class="no-print">Action</th>{% endif %}</tr></thead>
+        <thead>
+            <tr>
+                <th>Date Filed</th>
+                <th>Employee</th>
+                <th>Company</th>
+                <th>Position</th>
+                <th>Brand</th>
+                <th>Store</th>
+                <th>Requested Office Day</th>
+                <th>Purpose</th>
+                <th>Status</th>
+                <th>Approved / Adjusted Office Day</th>
+                <th>Requested By</th>
+                <th>HR Action By</th>
+                {% if session.role == 'ADMIN' %}<th class="no-print">Action</th>{% endif %}
+            </tr>
+        </thead>
         <tbody>
         {% for item in rows %}
-        <tr>
-            <td>{{ item.created_at }}</td><td>{{ item.employee_name }}</td>
-            <td>{{ item.company_name or "-" }}</td><td>{{ item.position or "-" }}</td>
-            <td>{{ item.brand }}</td><td>{{ item.store_assignment }}</td>
-            <td>{{ item.requested_date }}</td>
-            <td>{{ item.purpose }}{% if item.other_purpose %}: {{ item.other_purpose }}{% endif %}</td>
-            <td>{{ item.status }}</td><td>{{ item.approved_date or "-" }}</td>
-            <td>{{ item.requested_by_name or "-" }}</td><td>{{ item.hr_action_by or "-" }}</td>
-            {% if session.role == 'ADMIN' %}
-            <td class="no-print">
-                <form method="POST"
-                      action="{{ url_for('delete_request', request_id=item.id) }}"
-                      onsubmit="return confirm('Delete this Office Day record for {{ item.employee_name }}? This cannot be undone.');"
-                      style="margin:0;">
-                    <input type="hidden" name="return_to" value="reports">
-                    <input type="hidden" name="date_from" value="{{ date_from }}">
-                    <input type="hidden" name="date_to" value="{{ date_to }}">
-                    <button class="btn btn-danger" type="submit">Delete</button>
-                </form>
-            </td>
-            {% endif %}
-        </tr>
+            <tr>
+                <td>{{ item.created_at }}</td>
+                <td>{{ item.employee_name }}</td>
+                <td>{{ item.company_name or "-" }}</td>
+                <td>{{ item.position or "-" }}</td>
+                <td>{{ item.brand }}</td>
+                <td>{{ item.store_assignment }}</td>
+                <td>{{ item.requested_date }}</td>
+                <td>{{ item.purpose }}{% if item.other_purpose %}: {{ item.other_purpose }}{% endif %}</td>
+                <td>{{ item.status }}</td>
+                <td>{{ item.approved_date or "-" }}</td>
+                <td>{{ item.requested_by_name or "-" }}</td>
+                <td>{{ item.hr_action_by or "-" }}</td>
+                {% if session.role == 'ADMIN' %}
+                <td class="no-print">
+                    <form method="POST"
+                          action="{{ url_for('delete_request', request_id=item.id) }}"
+                          onsubmit="if (!confirm('Delete this Office Day record for {{ item.employee_name }}?')) return false; return confirm('FINAL CONFIRMATION: Permanently delete this record? This cannot be undone.');"
+                          style="margin:0;">
+                        <input type="hidden" name="return_to" value="reports">
+                        <input type="hidden" name="date_from" value="{{ date_from }}">
+                        <input type="hidden" name="date_to" value="{{ date_to }}">
+                        <button class="btn btn-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
         {% else %}
-        <tr><td colspan="{% if session.role == 'ADMIN' %}13{% else %}12{% endif %}" class="muted">No Office Day requests found.</td></tr>
+            <tr>
+                <td colspan="{% if session.role == 'ADMIN' %}13{% else %}12{% endif %}" class="muted">
+                    No Office Day requests found for the selected period.
+                </td>
+            </tr>
         {% endfor %}
         </tbody>
     </table>

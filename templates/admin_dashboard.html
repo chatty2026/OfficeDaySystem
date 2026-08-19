@@ -4,33 +4,50 @@
 {% block content %}
 <div class="metric-grid">
     <div class="metric"><div class="value">{{ counts.employees }}</div><div class="label">Active Employees</div></div>
+    <div class="metric"><div class="value">{{ total_requests }}</div><div class="label">Office Day Requests</div></div>
     <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending Requests</div></div>
-    <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
-    <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active Users</div></div>
+    <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active System Users</div></div>
 </div>
 
-<div class="card">
-    <div class="section-head">
-        <h2>Recent Office Day Requests</h2>
-        <a class="btn" href="{{ url_for('hr_dashboard') }}">View All Requests</a>
+<div class="grid-3">
+    <div class="card">
+        <h2>Office Day Request</h2>
+        <p class="muted">Submit, review, approve, adjust, or reject Office Day requests for all active employees.</p>
+        <a class="btn" href="{{ url_for('hr_dashboard') }}">Open</a>
     </div>
-    <div class="table-wrap">
-        <table>
-            <thead><tr><th>Employee</th><th>Store</th><th>Date</th><th>Requested By</th><th>Status</th></tr></thead>
-            <tbody>
-            {% for item in recent_requests %}
-                <tr>
-                    <td>{{ item.employee_name }}</td>
-                    <td>{{ item.store_assignment }}</td>
-                    <td>{{ item.requested_date }}</td>
-                    <td>{{ item.requested_by_name }}</td>
-                    <td><span class="badge">{{ item.status }}</span></td>
-                </tr>
-            {% else %}
-                <tr><td colspan="5" class="muted">No requests yet.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
+    <div class="card">
+        <h2>Employee Masterfile</h2>
+        <p class="muted">View, filter, import, export, and manage employee records.</p>
+        <a class="btn" href="{{ url_for('employee_master') }}">Open</a>
+    </div>
+    <div class="card">
+        <h2>Reports</h2>
+        <p class="muted">Generate Office Day reports by selected date range and download them in Excel.</p>
+        <a class="btn" href="{{ url_for('reports') }}">Open</a>
+    </div>
+</div>
+
+<div class="grid-3" style="margin-top:18px;">
+    <div class="card">
+        <h2>Company / Store / Brand</h2>
+        <p class="muted">Maintain the master lists used in employee and Office Day records.</p>
+        <div class="actions-inline">
+            <a class="btn btn-outline" href="{{ url_for('company_master') }}">Company</a>
+            <a class="btn btn-outline" href="{{ url_for('store_master') }}">Store</a>
+            <a class="btn btn-outline" href="{{ url_for('brand_master') }}">Brand</a>
+        </div>
+    </div>
+    <div class="card">
+        <h2>User Management</h2>
+        <p class="muted">Manage Admin, HR, and Sales system accounts and brand access.</p>
+        <a class="btn" href="{{ url_for('user_management') }}">Open</a>
+    </div>
+    <div class="card">
+        <h2>Approved / Adjusted</h2>
+        <div class="metric" style="box-shadow:none;padding:0;border:0;">
+            <div class="value">{{ counts.approved }}</div>
+            <div class="label">Completed Office Day schedules</div>
+        </div>
     </div>
 </div>
 {% endblock %}

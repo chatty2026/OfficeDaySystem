@@ -1,16 +1,81 @@
 {% extends "base.html" %}
-{% block title %}HR Dashboard{% endblock %}
-{% block page_title %}HR Dashboard / Office Day Requests{% endblock %}
+{% block title %}Office Day Request{% endblock %}
+{% block page_title %}Office Day Request{% endblock %}
 {% block content %}
-<div class="metric-grid">
-    <div class="metric"><div class="value">{{ counts.employees }}</div><div class="label">Active Employees</div></div>
-    <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending HR Approval</div></div>
-    <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
-    <div class="metric"><div class="value">{{ counts.users }}</div><div class="label">Active System Users</div></div>
+
+<div class="card">
+    <div class="section-head">
+        <h2>Request Office Day Schedule</h2>
+        <span class="muted">Admin / HR · All Active Employees</span>
+    </div>
+
+    <form method="POST" action="{{ url_for('hr_submit_request') }}">
+        <div class="grid-2">
+            <div>
+                <label>Employee</label>
+                <select id="employee_id" name="employee_id" required>
+                    <option value="">Select employee</option>
+                    {% for employee in employees %}
+                    <option value="{{ employee.id }}">{{ employee_display_name(employee) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Requested Office Day</label>
+                <input type="date" name="requested_date" required>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div>
+                <label>Company</label>
+                <input id="company_name" type="text" readonly>
+            </div>
+            <div>
+                <label>Position</label>
+                <input id="position" type="text" readonly>
+            </div>
+            <div>
+                <label>Brand</label>
+                <input id="brand" type="text" readonly>
+            </div>
+            <div>
+                <label>Store Assignment</label>
+                <input id="store_assignment" type="text" readonly>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div>
+                <label>Purpose</label>
+                <select id="purpose" name="purpose" required>
+                    <option value="">Select purpose</option>
+                    {% for purpose_item in purposes %}
+                    <option value="{{ purpose_item }}">{{ purpose_item }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="otherPurposeBox" style="display:none;">
+                <label>Specify Other Purpose</label>
+                <input id="other_purpose" type="text" name="other_purpose">
+            </div>
+        </div>
+
+        <label>Remarks</label>
+        <textarea name="remarks"></textarea>
+
+        <div class="actions-inline">
+            <button class="btn" type="submit">Submit Office Day Request</button>
+        </div>
+    </form>
 </div>
 
 <div class="card">
-    <div class="section-head"><h2>Office Day Requests</h2><a class="btn btn-outline" href="{{ url_for('reports') }}">Weekly Report</a></div>
+    <div class="section-head">
+        <h2>All Office Day Requests</h2>
+        <a class="btn btn-outline" href="{{ url_for('reports') }}">Reports</a>
+    </div>
+
     {% for item in office_requests %}
     <div class="request-card">
         <div class="detail-grid">
@@ -19,14 +84,15 @@
             <div class="detail"><small>Position</small>{{ item.position or "-" }}</div>
             <div class="detail"><small>Brand</small>{{ item.brand }}</div>
             <div class="detail"><small>Store Assignment</small>{{ item.store_assignment }}</div>
-            <div class="detail"><small>Requested Date</small>{{ item.requested_date }}</div>
+            <div class="detail"><small>Requested Office Day</small>{{ item.requested_date }}</div>
             <div class="detail"><small>Requested By</small>{{ item.requested_by_name }}</div>
             <div class="detail"><small>Status</small><span class="badge">{{ item.status }}</span></div>
         </div>
-        <p><strong>Purpose:</strong> {{ item.purpose }}{% if item.other_purpose %} — {{ item.other_purpose }}{% endif %}</p>
-        {% if item.remarks %}<p><strong>Sales Remarks:</strong> {{ item.remarks }}</p>{% endif %}
+
+        <p><strong>Purpose:</strong> {{ item.purpose }}{% if item.other_purpose %}: {{ item.other_purpose }}{% endif %}</p>
+        {% if item.remarks %}<p><strong>Remarks:</strong> {{ item.remarks }}</p>{% endif %}
         {% if item.hr_remarks %}<p><strong>HR Remarks:</strong> {{ item.hr_remarks }}</p>{% endif %}
-        {% if item.approved_date %}<p><strong>Approved/Adjusted Date:</strong> {{ item.approved_date }}</p>{% endif %}
+        {% if item.approved_date %}<p><strong>Approved / Adjusted Office Day:</strong> {{ item.approved_date }}</p>{% endif %}
 
         {% if item.status == "Pending HR Approval" %}
         <div class="grid-3">
@@ -35,6 +101,7 @@
                 <textarea name="hr_remarks"></textarea>
                 <button class="btn" type="submit">Approve</button>
             </form>
+
             <form method="POST" action="{{ url_for('adjust_request', request_id=item.id) }}">
                 <label>Adjusted Date</label>
                 <input type="date" name="adjusted_date" required>
@@ -42,6 +109,7 @@
                 <textarea name="hr_remarks" required></textarea>
                 <button class="btn btn-warning" type="submit">Adjust Schedule</button>
             </form>
+
             <form method="POST" action="{{ url_for('reject_request', request_id=item.id) }}">
                 <label>Reason / HR Remarks</label>
                 <textarea name="hr_remarks" required></textarea>
@@ -49,12 +117,13 @@
             </form>
         </div>
         {% endif %}
+
         {% if session.role == "ADMIN" %}
         <div class="actions-inline" style="margin-top:14px;">
             <form method="POST"
                   action="{{ url_for('delete_request', request_id=item.id) }}"
-                  onsubmit="return confirm('Delete this Office Day request for {{ item.employee_name }}? This cannot be undone.');"
-                  style="display:inline; margin:0;">
+                  onsubmit="if (!confirm('Delete this Office Day request for {{ item.employee_name }}?')) return false; return confirm('FINAL CONFIRMATION: Permanently delete this Office Day request? This cannot be undone.');"
+                  style="display:inline;margin:0;">
                 <input type="hidden" name="return_to" value="hr_dashboard">
                 <button class="btn btn-danger" type="submit">Delete Request</button>
             </form>
@@ -62,7 +131,33 @@
         {% endif %}
     </div>
     {% else %}
-        <p class="muted">No Office Day requests have been submitted.</p>
+    <p class="muted">No Office Day requests have been submitted.</p>
     {% endfor %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const employeeData = {{ employee_data | tojson }};
+const employeeSelect = document.getElementById("employee_id");
+const fields = ["company_name", "position", "brand", "store_assignment"];
+
+employeeSelect.addEventListener("change", function () {
+    const record = employeeData[this.value] || {};
+    fields.forEach(field => {
+        document.getElementById(field).value = record[field] || "";
+    });
+});
+
+const purpose = document.getElementById("purpose");
+const otherBox = document.getElementById("otherPurposeBox");
+const otherInput = document.getElementById("other_purpose");
+
+purpose.addEventListener("change", function () {
+    const show = this.value === "Other";
+    otherBox.style.display = show ? "block" : "none";
+    otherInput.required = show;
+    if (!show) otherInput.value = "";
+});
+</script>
 {% endblock %}

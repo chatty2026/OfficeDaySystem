@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}HR Dashboard{% endblock %}
+{% block page_title %}HR Dashboard{% endblock %}
+{% block content %}
+<div class="metric-grid">
+    <div class="metric"><div class="value">{{ counts.employees }}</div><div class="label">Active Employees</div></div>
+    <div class="metric"><div class="value">{{ total_requests }}</div><div class="label">Office Day Requests</div></div>
+    <div class="metric"><div class="value">{{ counts.pending }}</div><div class="label">Pending Requests</div></div>
+    <div class="metric"><div class="value">{{ counts.approved }}</div><div class="label">Approved / Adjusted</div></div>
+</div>
+
+<div class="grid-3">
+    <div class="card">
+        <h2>Office Day Request</h2>
+        <p class="muted">Submit and process Office Day requests for any active employee.</p>
+        <a class="btn" href="{{ url_for('hr_dashboard') }}">Open</a>
+    </div>
+    <div class="card">
+        <h2>Employee Masterfile</h2>
+        <p class="muted">View, filter, download, print, and maintain employee records.</p>
+        <a class="btn" href="{{ url_for('employee_master') }}">Open</a>
+    </div>
+    <div class="card">
+        <h2>Reports</h2>
+        <p class="muted">Generate Office Day reports for all employees by selected date range.</p>
+        <a class="btn" href="{{ url_for('reports') }}">Open</a>
+    </div>
+</div>
+{% endblock %}

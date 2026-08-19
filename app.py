@@ -471,7 +471,7 @@ def dashboard():
     if role == "ADMIN":
         return redirect(url_for("admin_dashboard"))
     if role == "HR":
-        return redirect(url_for("hr_dashboard"))
+        return redirect(url_for("hr_home"))
     return redirect(url_for("sales_dashboard"))
 
 
@@ -494,11 +494,31 @@ def admin_dashboard():
     recent_requests = format_rows_for_display(
         recent_requests, ("requested_date", "approved_date", "created_at")
     )
+    total_requests = connection.execute(
+        "SELECT COUNT(*) AS count FROM office_day_requests"
+    ).fetchone()["count"]
     connection.close()
     return render_template(
         "admin_dashboard.html",
         counts=counts,
-        recent_requests=recent_requests
+        recent_requests=recent_requests,
+        total_requests=total_requests
+    )
+
+
+@app.route("/hr/dashboard")
+@roles_required("HR")
+def hr_home():
+    connection = get_db_connection()
+    counts = fetch_dashboard_counts(connection)
+    total_requests = connection.execute(
+        "SELECT COUNT(*) AS count FROM office_day_requests"
+    ).fetchone()["count"]
+    connection.close()
+    return render_template(
+        "hr_home.html",
+        counts=counts,
+        total_requests=total_requests
     )
 
 
@@ -2064,35 +2084,24 @@ def reports():
     date_to = request.args.get("date_to", "").strip()
     rows = []
 
-    connection = get_db_connection()
-
-    if session["role"] in ("ADMIN", "HR"):
-        query = "SELECT * FROM office_day_requests WHERE 1=1"
-        params = []
-
-        if date_from and date_to:
-            query += " AND requested_date BETWEEN ? AND ?"
-            params.extend([date_from, date_to])
-
-        query += " ORDER BY created_at DESC, employee_name"
-        rows = connection.execute(query, params).fetchall()
-
-    elif date_from and date_to:
+    if date_from and date_to:
+        connection = get_db_connection()
         query = """
             SELECT * FROM office_day_requests
             WHERE requested_date BETWEEN ? AND ?
-              AND requested_by = ?
-            ORDER BY requested_date, employee_name
         """
-        rows = connection.execute(
-            query,
-            (date_from, date_to, session["user_id"])
-        ).fetchall()
+        params = [date_from, date_to]
 
-    rows = format_rows_for_display(
-        rows, ("requested_date", "approved_date", "created_at")
-    )
-    connection.close()
+        if session["role"] == "SALES":
+            query += " AND requested_by = ?"
+            params.append(session["user_id"])
+
+        query += " ORDER BY requested_date, employee_name"
+        rows = connection.execute(query, params).fetchall()
+        rows = format_rows_for_display(
+            rows, ("requested_date", "approved_date", "created_at")
+        )
+        connection.close()
 
     return render_template(
         "reports.html",
@@ -2108,27 +2117,22 @@ def export_reports_excel():
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
 
+    if not date_from or not date_to:
+        flash("Select a date range first.", "error")
+        return redirect(url_for("reports"))
+
     connection = get_db_connection()
+    query = """
+        SELECT * FROM office_day_requests
+        WHERE requested_date BETWEEN ? AND ?
+    """
+    params = [date_from, date_to]
 
-    if session["role"] in ("ADMIN", "HR"):
-        query = "SELECT * FROM office_day_requests WHERE 1=1"
-        params = []
-        if date_from and date_to:
-            query += " AND requested_date BETWEEN ? AND ?"
-            params.extend([date_from, date_to])
-    else:
-        if not date_from or not date_to:
-            connection.close()
-            flash("Select a date range first.", "error")
-            return redirect(url_for("reports"))
-        query = """
-            SELECT * FROM office_day_requests
-            WHERE requested_date BETWEEN ? AND ?
-              AND requested_by = ?
-        """
-        params = [date_from, date_to, session["user_id"]]
+    if session["role"] == "SALES":
+        query += " AND requested_by = ?"
+        params.append(session["user_id"])
 
-    query += " ORDER BY created_at DESC, employee_name"
+    query += " ORDER BY requested_date, employee_name"
     rows = connection.execute(query, params).fetchall()
     connection.close()
 
@@ -2198,10 +2202,7 @@ def export_reports_excel():
     wb.save(output)
     output.seek(0)
 
-    if date_from and date_to:
-        filename = f"office_day_report_{date_from}_to_{date_to}.xlsx"
-    else:
-        filename = "office_day_report_all_records.xlsx"
+    filename = f"office_day_report_{date_from}_to_{date_to}.xlsx"
 
     return Response(
         output.getvalue(),
